@@ -1,0 +1,40 @@
+# Local/private release credentials
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.key
+.local/
+test-builds/
+
+# Android generated output
+ALTEK-Link-0.1.16/build/
+ALTEK-Link-0.1.16/gen/
+ALTEK-Link-0.1.16/app-*.apk
+ALTEK-Link-0.1.16/bin/
+ALTEK-Link-0.1.16/*.idsig
+ALTEK-Link-0.1.16/tools/logs/
+
+# Windows generated output and diagnostics
+ALTEK-Link-Windows-0.1.7/build/
+ALTEK-Link-Windows-0.1.7/bin/**/AltekLink.exe
+ALTEK-Link-Windows-0.1.7/bin/**/AltekLink.pdb
+ALTEK-Link-Windows-0.1.7/bin/**/screen.h264
+ALTEK-Link-Windows-0.1.7/src/icons.c_
+ALTEK-Link-Windows-0.1.7/src/src.zip
+*.obj
+*.o
+*.pdb
+
+# Local settings and editor/OS files
+settings.ini
+debug.log
+Thumbs.db
+.DS_Store
+
+# Local AI/Codex guidance and pre-release handoff state
+AGENTS.md
+**/AGENTS.md
+docs/CODEMAP.md
+docs/STATUS.md
+TESTING.md

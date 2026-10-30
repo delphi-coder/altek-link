@@ -1,0 +1,14 @@
+OpenH264 headers and binary DLLs: Cisco Systems, version 2.4.1.
+Headers: https://github.com/cisco/openh264/tree/v2.4.1/codec/api/wels
+x86 source binary URL: https://ciscobinary.openh264.org/openh264-2.4.1-win32.dll.bz2
+x64 source binary URL: https://ciscobinary.openh264.org/openh264-2.4.1-win64.dll.bz2
+The DLL files are decompressed unchanged and renamed openh264.dll.
+See openh264/LICENSE and openh264/BINARY_LICENSE.txt.
+
+Emoji artwork: Twemoji, copyright Twitter, Inc. and other contributors,
+licensed CC BY 4.0, https://github.com/twitter/twemoji .
+Ten original PNG images are reused unchanged from the existing Android project.
+See LICENSE-EMOJI.txt for the full license.
+
+Windows APIs and the Windows SDK are not redistributed in this package.
+Build tools used to verify this package are not runtime dependencies.

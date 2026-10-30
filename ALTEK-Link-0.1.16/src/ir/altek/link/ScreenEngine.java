@@ -1,0 +1,325 @@
+package ir.altek.link;
+
+import java.io.*;
+import java.util.concurrent.*;
+import javax.net.ssl.SSLSocket;
+
+/**
+ * Carries the "screen" call's two channels over one TLS socket: screen frames flow from the shared
+ * device to the controller, and gestures flow the other way. A viewer passes a {@link FrameListener}
+ * and null for {@link ControlListener}; the device being controlled passes the reverse. The read
+ * loop always dispatches both packet kinds and simply ignores whichever listener is null, so one
+ * class covers both ends.
+ *
+ * <p>Wire format: each packet (already length-framed by {@link Wire}) starts with a kind byte:
+ * 0 = keepalive, 1 = format, 2 = frame, 3 = control. This is a private sub-protocol for this one
+ * socket, independent of {@link MediaEngine}'s own packet kinds on audio/video call sockets.
+ */
+public final class ScreenEngine {
+  public interface FrameListener {
+    /** config is SPS/PPS bytes when h264 is true, otherwise null (JPEG frames). */
+    void format(boolean h264, int w, int h, byte[] config);
+
+    void frame(boolean keyFrame, long ptsMicros, byte[] bytes);
+  }
+
+  public interface ControlListener {
+    void tap(float x, float y);
+
+    void swipe(float x1, float y1, float x2, float y2, int durationMs);
+
+    /** action is one of AccessibilityService.GLOBAL_ACTION_BACK/HOME/RECENTS. */
+    void key(int action);
+
+    /** scale>1 = zoom in, scale<1 = zoom out. cx/cy are normalized midpoint. */
+    void pinch(float cx, float cy, float scale);
+
+    /* Raw mouse event stream: op=5 down, op=6 move, op=7 up, op=8 right down, op=9 right up.
+     * Coordinates are normalized 0..1 on the remote screen. */
+    void mouseDown(float x, float y);
+
+    void mouseMove(float x, float y);
+
+    void mouseUp(float x, float y);
+
+    void mouseRightDown(float x, float y);
+
+    void mouseRightUp(float x, float y);
+
+    /** Hardware key forwarding: PC virtual-key code and down(true)/up(false). */
+    void keyEvent(int vk, int down);
+  }
+
+  public interface Listener {
+    void status(String text);
+
+    void ended();
+  }
+
+  private static final int KIND_FORMAT = 1, KIND_FRAME = 2, KIND_CONTROL = 3;
+
+  private final SSLSocket socket;
+  private final FrameListener frames;
+  private final ControlListener control;
+  private final Listener listener;
+  private volatile boolean running = true;
+  // Frames can be bulky; drop the oldest under backpressure rather than build up latency.
+  private final ArrayBlockingQueue<byte[]> frameQueue = new ArrayBlockingQueue<byte[]>(2);
+  // Control packets are small and matter more; give them more room and never drop them here.
+  private final ArrayBlockingQueue<byte[]> controlQueue = new ArrayBlockingQueue<byte[]>(32);
+
+  public ScreenEngine(
+      SSLSocket socket, FrameListener frames, ControlListener control, Listener listener) {
+    this.socket = socket;
+    this.frames = frames;
+    this.control = control;
+    this.listener = listener;
+    Thread writer =
+        new Thread(
+            new Runnable() {
+              public void run() {
+                writeLoop();
+              }
+            },
+            "screen-tx");
+    writer.start();
+    new Thread(
+            new Runnable() {
+              public void run() {
+                readLoop();
+              }
+            },
+            "screen-rx")
+        .start();
+  }
+
+  public void sendFormat(boolean h264, int w, int h, byte[] config) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_FORMAT);
+      o.writeByte(h264 ? 1 : 0);
+      o.writeInt(w);
+      o.writeInt(h);
+      if (h264 && config != null) o.write(config);
+      enqueueFrame(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  public void sendFrame(boolean keyFrame, long ptsMicros, byte[] bytes) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_FRAME);
+      o.writeByte(keyFrame ? 1 : 0);
+      o.writeLong(ptsMicros);
+      o.write(bytes);
+      enqueueFrame(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  public void sendTap(float x, float y) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_CONTROL);
+      o.writeByte(1);
+      o.writeFloat(x);
+      o.writeFloat(y);
+      enqueueControl(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  public void sendKey(int action) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_CONTROL);
+      o.writeByte(3);
+      o.writeInt(action);
+      enqueueControl(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  public void sendSwipe(float x1, float y1, float x2, float y2, int durationMs) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_CONTROL);
+      o.writeByte(2);
+      o.writeFloat(x1);
+      o.writeFloat(y1);
+      o.writeFloat(x2);
+      o.writeFloat(y2);
+      o.writeInt(durationMs);
+      enqueueControl(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  /** Multiplicative pinch zoom (like Gallery pinch). scale>1 = zoom in, scale<1 = zoom out. Coordinates
+   * are the pinch midpoint, normalized 0..1 relative to the displayed view. */
+  public void sendPinch(float cx, float cy, float scale) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_CONTROL);
+      o.writeByte(4);
+      o.writeFloat(cx);
+      o.writeFloat(cy);
+      o.writeFloat(scale);
+      enqueueControl(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  public void sendMouseDown(float x, float y) {
+    sendMouse(5, x, y);
+  }
+
+  public void sendMouseMove(float x, float y) {
+    sendMouse(6, x, y);
+  }
+
+  public void sendMouseUp(float x, float y) {
+    sendMouse(7, x, y);
+  }
+
+  public void sendRightDown(float x, float y) {
+    sendMouse(8, x, y);
+  }
+
+  public void sendRightUp(float x, float y) {
+    sendMouse(9, x, y);
+  }
+
+  private void sendMouse(int op, float x, float y) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_CONTROL);
+      o.writeByte(op);
+      o.writeFloat(x);
+      o.writeFloat(y);
+      enqueueControl(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  private void enqueueFrame(byte[] b) {
+    if (!running) return;
+    if (!frameQueue.offer(b)) {
+      frameQueue.poll();
+      frameQueue.offer(b);
+    }
+  }
+
+  private void enqueueControl(byte[] b) {
+    if (running && !controlQueue.offer(b)) error(new IOException("Control channel too slow"));
+  }
+
+  private void writeLoop() {
+    try {
+      DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+      while (running) {
+        // Control gestures are small and latency-sensitive: always send any waiting one first.
+        byte[] b = controlQueue.poll();
+        if (b == null) b = frameQueue.poll(300, TimeUnit.MILLISECONDS);
+        if (b == null) b = new byte[] {0};
+        Wire.write(out, b);
+      }
+    } catch (Exception e) {
+      if (running) error(e);
+    }
+  }
+
+  private void readLoop() {
+    try {
+      DataInputStream in = new DataInputStream(socket.getInputStream());
+      while (running) {
+        byte[] b = Wire.read(in, Wire.MAX_MEDIA);
+        if (b.length < 1) throw new IOException("Empty screen packet");
+        DataInputStream packet = new DataInputStream(new ByteArrayInputStream(b));
+        int kind = packet.readUnsignedByte();
+        DebugLog.event("SCREEN_PACKET", "kind=" + kind + " len=" + b.length);
+        if (kind == KIND_FORMAT) {
+          boolean h264 = packet.readUnsignedByte() != 0;
+          int w = packet.readInt(), h = packet.readInt();
+          byte[] config = h264 ? new byte[b.length - 10] : null;
+          if (config != null) packet.readFully(config);
+          DebugLog.event("SCREEN_FORMAT", "h264=" + h264 + " " + w + "x" + h + " config=" + (config == null ? 0 : config.length));
+          if (frames != null) frames.format(h264, w, h, config);
+        } else if (kind == KIND_FRAME) {
+          boolean key = packet.readUnsignedByte() != 0;
+          long pts = packet.readLong();
+          byte[] bytes = new byte[b.length - 10];
+          packet.readFully(bytes);
+          DebugLog.event("SCREEN_FRAME", "key=" + key + " pts=" + pts + " size=" + bytes.length);
+          if (frames != null) frames.frame(key, pts, bytes);
+        } else if (kind == KIND_CONTROL) {
+          int op = packet.readUnsignedByte();
+          if (op == 1) {
+            float x = packet.readFloat(), y = packet.readFloat();
+            if (control != null) control.tap(x, y);
+          } else if (op == 2) {
+            float x1 = packet.readFloat(),
+                y1 = packet.readFloat(),
+                x2 = packet.readFloat(),
+                y2 = packet.readFloat();
+            int ms = packet.readInt();
+            if (control != null) control.swipe(x1, y1, x2, y2, ms);
+          } else if (op == 3) {
+            int action = packet.readInt();
+            if (control != null) control.key(action);
+          } else if (op == 4) {
+            float cx = packet.readFloat(), cy = packet.readFloat(), scale = packet.readFloat();
+            if (control != null) control.pinch(cx, cy, scale);
+          } else if (op == 5) {
+            float x = packet.readFloat(), y = packet.readFloat();
+            if (control != null) control.mouseDown(x, y);
+          } else if (op == 6) {
+            float x = packet.readFloat(), y = packet.readFloat();
+            if (control != null) control.mouseMove(x, y);
+          } else if (op == 7) {
+            float x = packet.readFloat(), y = packet.readFloat();
+            if (control != null) control.mouseUp(x, y);
+          } else if (op == 8) {
+            float x = packet.readFloat(), y = packet.readFloat();
+            if (control != null) control.mouseRightDown(x, y);
+          } else if (op == 9) {
+            float x = packet.readFloat(), y = packet.readFloat();
+            if (control != null) control.mouseRightUp(x, y);
+          } else if (op == 13) {
+            int vk = packet.readInt(), down = packet.readInt();
+            if (control != null) control.keyEvent(vk, down);
+          }
+        } else if (kind != 0) throw new IOException("Screen packet type");
+      }
+    } catch (Exception e) {
+      if (running) error(e);
+    }
+  }
+
+  private void error(Exception e) {
+    DebugLog.error("SCREEN_ENGINE", e);
+    stop();
+    listener.ended();
+  }
+
+  public void stop() {
+    if (!running) return;
+    running = false;
+    Wire.close(socket);
+  }
+}
