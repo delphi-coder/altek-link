@@ -3,122 +3,86 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="ALTEK Link is a lightweight peer-to-peer messenger, calling, file transfer, and remote-screen app for local networks.">
-  <meta name="theme-color" content="#071b22">
-  <title>ALTEK Link — Local communication, directly</title>
+  <meta name="description" content="ALTEK Link connects Android and Windows on your local network for chat, files, calls and screen sharing.">
+  <meta name="theme-color" content="#193782">
+  <title>ALTEK Link — Your devices, in touch</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="nav shell">
-    <a class="brand" href="#top" aria-label="ALTEK Link home">
-      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span>ALTEK <b>Link</b></span>
-    </a>
-    <nav aria-label="Main navigation">
-      <a href="#features">Features</a>
-      <a href="#downloads">Downloads</a>
-      <a href="https://github.com/delphi-coder/altek-link">Source</a>
-    </nav>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="#top" aria-label="ALTEK Link home"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span><span>ALTEK <b>Link</b><small>LOCAL NETWORK TOOLS</small></span></a>
+      <nav aria-label="Main navigation"><a href="#what-it-does">Features</a><a href="#how-it-works">How it works</a><a href="https://github.com/delphi-coder/altek-link">GitHub ↗</a><a class="nav-download" href="#download">Get the app <span>↓</span></a></nav>
+    </div>
   </header>
 
   <main id="top">
-    <section class="hero shell">
+    <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="eyebrow"><span></span> Built for the local network</p>
-        <h1>Your devices.<br><em>Your network.</em><br>No middleman.</h1>
-        <p class="lede">ALTEK Link brings messaging, file transfer, audio and video calls, and remote-screen tools to Android and Windows—peer to peer, without an account or central server.</p>
-        <div class="actions">
-          <a class="button primary" href="#downloads">Download ALTEK Link</a>
-          <a class="button quiet" href="https://github.com/delphi-coder/altek-link">View source <span>↗</span></a>
+        <div class="eyebrow"><span class="live-dot"></span> BUILT FOR YOUR LOCAL NETWORK</div>
+        <h1 id="hero-title">Your devices.<br><span>In touch.</span></h1>
+        <p class="hero-lead">The photos on your phone. A file on your PC. A screen you need to see. Bring them together, right where they are.</p>
+        <p class="hero-detail">ALTEK Link connects Android and Windows over your local network for messaging, file sharing, calls and remote screens. No account or internet connection required for local use.</p>
+        <div class="hero-actions"><a class="button button-primary" href="#download">Download ALTEK Link <span>↓</span></a><a class="button button-text" href="#what-it-does">See what it can do <span>→</span></a></div>
+        <div class="hero-meta"><div><strong>Android 4.1+</strong><span>Phones &amp; tablets</span></div><div><strong>Windows 7+</strong><span>32-bit &amp; 64-bit</span></div><div><strong>Open source</strong><span>Built to be explored</span></div></div>
+      </div>
+      <div class="hero-visual" aria-label="An illustration of the Android and Windows ALTEK Link interfaces">
+        <div class="visual-top"><span>YOUR DEVICES, ONE NETWORK</span><span><i></i> LOCAL CONNECTION</span></div>
+        <div class="mini-network" aria-hidden="true"><div class="mini-ring ring-outer"></div><div class="mini-ring ring-inner"></div><span class="mini-node node-one"></span><span class="mini-node node-two"></span><span class="mini-line"></span><b>LINK</b></div>
+        <div class="visual-images">
+          <figure class="desktop-shot"><div class="image-label"><span>WINDOWS</span><span>01</span></div><img src="images/altek-link-windows.png" alt="Windows conversation and file transfer with example device names"></figure>
+          <figure class="phone-shot"><div class="image-label"><span>ANDROID</span><span>02</span></div><img src="images/altek-link-android.png" alt="Android device list with example names and profile pictures"></figure>
         </div>
-        <ul class="facts" aria-label="Key facts">
-          <li><strong>LAN-first</strong><span>Local discovery</span></li>
-          <li><strong>Peer-to-peer</strong><span>Direct connections</span></li>
-          <li><strong>Open source</strong><span>MIT licensed</span></li>
-        </ul>
-      </div>
-
-      <div class="network-card" aria-label="Illustration of devices connected directly on a local network">
-        <div class="glow"></div>
-        <div class="orbit orbit-one"></div>
-        <div class="orbit orbit-two"></div>
-        <div class="device phone"><span></span><small>Android</small></div>
-        <div class="device desktop"><span></span><small>Windows</small></div>
-        <div class="link-line"><i></i><i></i><i></i></div>
-        <div class="status"><span></span> Direct link established</div>
+        <p class="visual-note">Interface previews · Names and profile images changed for privacy</p>
       </div>
     </section>
 
-    <section class="statement">
-      <div class="shell statement-grid">
-        <p class="section-number">01 / WHY ALTEK LINK</p>
-        <h2>Useful communication tools<br>that stay <em>close to home.</em></h2>
-        <p>Devices discover each other on the same network. There is no registration flow and no cloud service required for ordinary operation.</p>
-      </div>
+    <div class="signal-bar"><div class="wrap signal-inner"><span>DIRECT DEVICE-TO-DEVICE</span><span>YOUR WI-FI OR HOTSPOT</span><span>NO CLOUD REQUIRED</span><span>ANDROID + WINDOWS</span></div></div>
+
+    <section class="section wrap intro" id="what-it-does">
+      <div class="section-index"><span>01</span><p>THE IDEA</p></div>
+      <div><p class="kicker">KEEP IT CLOSE</p><h2>A good connection<br>doesn’t need to go far.</h2><p class="section-lead">When two devices are already on the same network, sharing between them should be straightforward. ALTEK Link gives you a familiar chat window for the things you want to send—and a few useful ways to stay connected beyond that.</p></div>
+      <aside class="quote-card"><span>“</span><p>Built for those small moments when your devices are right next to each other, but your files aren’t.</p><small>THE REASON FOR ALTEK LINK</small></aside>
     </section>
 
-    <section class="features shell" id="features">
-      <div class="section-heading">
-        <p class="section-number">02 / CAPABILITIES</p>
-        <h2>One small app,<br>the essentials covered.</h2>
+    <section class="section wrap capabilities">
+      <div class="section-head"><div><p class="kicker">EVERYDAY TOOLS</p><h2>One connection.<br>Plenty of uses.</h2></div><p>From a quick photo to a remote screen, the same simple idea runs through the whole app: communicate directly on your local network.</p></div>
+      <div class="capability-grid">
+        <article><div class="card-top"><span class="cap-icon">↗</span><span>01 / SHARE</span></div><h3>Photos, videos, files.</h3><p>Send files between phones, or move them between Android and Windows. They travel over the local network, without an internet upload. A 100 MiB limit per file applies in the current release.</p></article>
+        <article><div class="card-top"><span class="cap-icon">✎</span><span>02 / CHAT</span></div><h3>Words are files too.</h3><p>Send a link, a snippet of code or a message to the device beside you. The messenger-style interface feels familiar, even when there’s no internet.</p></article>
+        <article><div class="card-top"><span class="cap-icon">▣</span><span>03 / SCREEN</span></div><h3>See the other screen.</h3><p>Share a Windows or Android screen with a compatible PC or phone. Remote controls are available where the platform and its permissions allow them.</p></article>
+        <article><div class="card-top"><span class="cap-icon">◉</span><span>04 / CAMERA</span></div><h3>Put a spare phone to work.</h3><p>Make a video call to see a difficult-to-reach spot. Or arm an Android camera and let an approved contact view it on demand from another device.</p></article>
       </div>
-      <div class="feature-grid">
-        <article class="feature featured">
-          <span class="icon">↯</span>
-          <div><h3>Local discovery</h3><p>Find compatible peers automatically on the LAN and connect directly.</p></div>
-          <span class="tag">CORE</span>
-        </article>
-        <article class="feature"><span class="icon">✦</span><div><h3>Messages & files</h3><p>Exchange conversations and files without routing them through a remote service.</p></div></article>
-        <article class="feature"><span class="icon">◖</span><div><h3>Audio & video</h3><p>Start direct calls between supported Android and Windows peers.</p></div></article>
-        <article class="feature"><span class="icon">▣</span><div><h3>Screen sharing</h3><p>Share a desktop and use remote-control tools where the platform supports them.</p></div></article>
-        <article class="feature"><span class="icon">⌁</span><div><h3>Cross-platform</h3><p>Android and Windows clients share the same protocol-v1 wire contract.</p></div></article>
-      </div>
+      <div class="network-note"><span class="note-icon">⌁</span><p><strong>Wi-Fi, or a phone hotspot.</strong> Internet access isn’t needed for ordinary local use. Devices do need to reach each other; hotspot isolation, firewall rules and hardware can affect discovery and performance.</p></div>
     </section>
 
-    <section class="downloads" id="downloads">
-      <div class="shell">
-        <div class="section-heading light">
-          <p class="section-number">03 / DOWNLOADS</p>
-          <h2>Choose your platform.</h2>
-          <p>Current source releases. Windows packages include the matching OpenH264 runtime.</p>
+    <section class="lightweight">
+      <div class="wrap lightweight-inner"><div><p class="kicker light-kicker">A SMALL FOOTPRINT</p><h2>Small enough to keep.<br>Useful enough to open.</h2><p>The app is designed for devices old and new. These are the approximate sizes of the released files, before compression.</p></div><div class="measurements"><div><strong>146 <small>KiB</small></strong><span>Android APK</span></div><div><strong>232–239 <small>KiB</small></strong><span>Windows executable</span></div><div><strong>795–952 <small>KiB</small></strong><span>OpenH264 DLL · included with Windows</span></div></div></div>
+    </section>
+
+    <section class="section wrap technical" id="how-it-works">
+      <div class="section-index"><span>02</span><p>UNDER THE HOOD</p></div>
+      <div class="technical-body"><p class="kicker">A CLOSER LOOK</p><h2>Simple to use.<br>Thoughtful underneath.</h2><p class="section-lead">Android and Windows have separate implementations, connected by the same documented protocol. Here’s what happens behind the conversation.</p>
+        <div class="tech-list">
+          <article><span>01</span><div><h3>Discovery stays local</h3><p>Peers announce themselves using UDP broadcasts on the network. You can also probe a device by IPv4 address when automatic discovery isn’t available.</p></div><code>UDP / 45872</code></article>
+          <article><span>02</span><div><h3>Identity belongs to the device</h3><p>Each installation has a self-signed certificate; connections use mutual TLS 1.2. Compare certificate fingerprints through a trusted channel to verify a contact—names and avatars alone don’t prove identity.</p></div><code>TLS / 1.2</code></article>
+          <article><span>03</span><div><h3>Transfers are checked</h3><p>Messages are queued until acknowledged. Files are accepted by the receiver and verified with SHA-256 after transfer. An interrupted download starts again from the beginning.</p></div><code>SHA-256</code></article>
+          <article><span>04</span><div><h3>Media, without a middleman</h3><p>Video uses H.264: MediaCodec on Android and OpenH264 on Windows. Audio is PCM. Calls and screen streams use separate encrypted TCP connections; actual quality depends on the devices and network.</p></div><code>H.264 / TLS</code></article>
         </div>
-        <div class="download-grid">
-          <article class="download-card">
-            <div class="platform"><span class="platform-icon">A</span><div><h3>Android</h3><p>Version 0.1.16</p></div></div>
-            <p>Android 4.1 or newer · APK</p>
-            <a class="button download" href="https://github.com/delphi-coder/altek-link/releases/download/android-v0.1.16/altek-link-android-0.1.16.apk">Download APK <span>↓</span></a>
-          </article>
-          <article class="download-card">
-            <div class="platform"><span class="platform-icon window">⊞</span><div><h3>Windows x86</h3><p>Version 0.1.7 · build 8</p></div></div>
-            <p>Windows 7 or newer · 32-bit ZIP</p>
-            <a class="button download" href="https://github.com/delphi-coder/altek-link/releases/download/windows-v0.1.7-build.8/altek-link-windows-0.1.7-build.8-x86.zip">Download x86 <span>↓</span></a>
-          </article>
-          <article class="download-card">
-            <div class="platform"><span class="platform-icon window">⊞</span><div><h3>Windows x64</h3><p>Version 0.1.7 · build 8</p></div></div>
-            <p>Windows 7 or newer · 64-bit ZIP</p>
-            <a class="button download" href="https://github.com/delphi-coder/altek-link/releases/download/windows-v0.1.7-build.8/altek-link-windows-0.1.7-build.8-x64.zip">Download x64 <span>↓</span></a>
-          </article>
-        </div>
-        <p class="release-note">Windows executables are not Authenticode-signed yet and may trigger a SmartScreen warning. Review the source and release notes before installation.</p>
+        <a class="inline-link" href="https://github.com/delphi-coder/altek-link/blob/main/docs/PROTOCOL.md">Read the protocol notes <span>↗</span></a>
       </div>
     </section>
 
-    <section class="principles shell">
-      <div><p class="section-number">04 / PRINCIPLES</p><h2>Small footprint.<br>Clear boundaries.</h2></div>
-      <div class="principle-list">
-        <article><span>01</span><div><h3>No account required</h3><p>Identity is created locally. Ordinary LAN use does not depend on an online account.</p></div></article>
-        <article><span>02</span><div><h3>Interoperable by design</h3><p>Both clients evolve against a documented shared protocol.</p></div></article>
-        <article><span>03</span><div><h3>Source available</h3><p>Inspect, build, and improve the first-party code under the MIT License.</p></div></article>
-      </div>
-    </section>
+    <section class="section wrap compatibility"><div><p class="kicker">BEFORE YOU START</p><h2>A little about permissions.</h2></div><div><p>Android 5 and newer use the system screen-capture permission. On Android 4.1–4.4, screen capture requires root. Remote touch control can use Accessibility on Android 7 and newer; older versions require root. Features and performance vary by device, and not every hardware and OS combination has been tested.</p><p>For on-demand camera viewing, the Android camera endpoint must be armed and the contact explicitly permitted. Windows can view an armed Android camera; it does not currently act as that camera endpoint.</p></div></section>
+
+    <section class="download-section" id="download"><div class="wrap"><div class="download-heading"><div><p class="kicker light-kicker">GET ALTEK LINK</p><h2>Ready when you are.</h2></div><p>Choose a version for each device. The Windows packages include the matching OpenH264 video codec.</p></div>
+      <div class="download-grid">
+        <article><div class="download-label"><span>01 / ANDROID</span><span>APK</span></div><h3>Android</h3><p>Android 4.1 and later<br>Version 0.1.16 · ~146 KiB</p><a href="https://github.com/delphi-coder/altek-link/releases/download/android-v0.1.16/altek-link-android-0.1.16.apk">Download APK <span>↓</span></a></article>
+        <article><div class="download-label"><span>02 / WINDOWS</span><span>64-BIT</span></div><h3>Windows x64</h3><p>Windows 7 and later<br>Version 0.1.7 · Build 8</p><a href="https://github.com/delphi-coder/altek-link/releases/download/windows-v0.1.7-build.8/altek-link-windows-0.1.7-build.8-x64.zip">Download x64 <span>↓</span></a></article>
+        <article><div class="download-label"><span>03 / WINDOWS</span><span>32-BIT</span></div><h3>Windows x86</h3><p>Windows 7 and later<br>Version 0.1.7 · Build 8</p><a href="https://github.com/delphi-coder/altek-link/releases/download/windows-v0.1.7-build.8/altek-link-windows-0.1.7-build.8-x86.zip">Download x86 <span>↓</span></a></article>
+      </div><p class="download-note">Windows executables are not Authenticode-signed and may trigger a SmartScreen warning. These are early releases; check the release notes for details.</p>
+    </div></section>
   </main>
-
-  <footer>
-    <div class="shell footer-inner">
-      <div class="brand footer-brand"><span class="brand-mark"><i></i><i></i><i></i></span><span>ALTEK <b>Link</b></span></div>
-      <p>Peer-to-peer communication for local networks.</p>
-      <div><a href="https://github.com/delphi-coder/altek-link">GitHub</a><a href="PROTOCOL.md">Protocol</a><a href="https://github.com/delphi-coder/altek-link/blob/main/LICENSE">License</a></div>
-    </div>
-  </footer>
+  <footer><div class="wrap footer-inner"><a class="brand footer-brand" href="#top"><span class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i></span><span>ALTEK <b>Link</b></span></a><p>Built for the devices around you.</p><div><a href="https://github.com/delphi-coder/altek-link">GitHub ↗</a><a href="https://github.com/delphi-coder/altek-link/blob/main/LICENSE">License</a><a href="#top">Back to top ↑</a></div></div></footer>
 </body>
 </html>
