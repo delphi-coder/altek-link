@@ -4,7 +4,7 @@ This is the current shared interoperability contract, derived from both active s
 
 ## Discovery and presence
 
-Implemented by [`network.c`](../ALTEK-Link-Windows-0.1.7/src/network.c) (`discovery_loop`, `announce`) and [`LinkService.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/LinkService.java) (`discoverLoop`, `announce`).
+Implemented by [`network.c`](../windows/src/network.c) (`discovery_loop`, `announce`) and [`LinkService.java`](../android/src/ir/altek/link/LinkService.java) (`discoverLoop`, `announce`).
 
 - UDP port 45872; receivers accept at most 2048 bytes and decode UTF-8 JSON.
 - Packet: `{"app":"ALTEK_LINK","v":1,"id":"<64 lowercase hex>","name":"...","avatar":"<empty or 64 lowercase hex>","cert":"<optional base64 DER leaf>"}`. Current Windows peers include `cert`; older peers omit it.
@@ -15,7 +15,7 @@ Implemented by [`network.c`](../ALTEK-Link-Windows-0.1.7/src/network.c) (`discov
 
 ## TLS identity, connection, and authorization
 
-Implemented by [`tls.c`](../ALTEK-Link-Windows-0.1.7/src/tls.c), [`Identity.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/Identity.java), and each platform's request dispatcher.
+Implemented by [`tls.c`](../windows/src/tls.c), [`Identity.java`](../android/src/ir/altek/link/Identity.java), and each platform's request dispatcher.
 
 - TCP port 45871, TLS 1.2 only, mutual certificate presentation, one control operation per connection. Media uses a separate TLS connection.
 - Each install owns a self-signed RSA certificate/key (minimum 2048-bit RSA). Peer ID is lowercase SHA-256 of the DER leaf certificate.
@@ -26,7 +26,7 @@ Implemented by [`tls.c`](../ALTEK-Link-Windows-0.1.7/src/tls.c), [`Identity.java
 
 ## Framing, encoding, and request envelope
 
-Implemented by [`tls.c`](../ALTEK-Link-Windows-0.1.7/src/tls.c) (`wire_send`, `wire_read`), [`Wire.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/Wire.java), [`network.c`](../ALTEK-Link-Windows-0.1.7/src/network.c), and `LinkService.request`/`handle`.
+Implemented by [`tls.c`](../windows/src/tls.c) (`wire_send`, `wire_read`), [`Wire.java`](../android/src/ir/altek/link/Wire.java), [`network.c`](../windows/src/network.c), and `LinkService.request`/`handle`.
 
 - Every JSON or media record is `length:u32 big-endian` followed by exactly that many bytes. Implementations use signed 32-bit storage but reject negative lengths.
 - JSON maximum: 65,536 bytes. Media/screen record maximum: 2 MiB. Text encoding is UTF-8; binary numeric fields described below are big-endian unless stated otherwise.
@@ -56,7 +56,7 @@ Implemented by `network.c` (`flush`, `send_pending`, `handle`) and `LinkService`
 
 ## File and profile exchange
 
-Implemented by [`files.c`](../ALTEK-Link-Windows-0.1.7/src/files.c), [`image.c`](../ALTEK-Link-Windows-0.1.7/src/image.c), `LinkService.offer`/`download`, and [`Profile.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/Profile.java).
+Implemented by [`files.c`](../windows/src/files.c), [`image.c`](../windows/src/image.c), `LinkService.offer`/`download`, and [`Profile.java`](../android/src/ir/altek/link/Profile.java).
 
 - Files are staged before `offer`, capped at 100 MiB, owned by UUID+recipient, and SHA-256 verified after exact-size download. A failed/retried download restarts from byte zero; no resume protocol exists.
 - The final receiver ACK lets the sender mark `transferred`. An offer ACK marks only `offered`, not downloaded.
@@ -66,7 +66,7 @@ Implemented by [`files.c`](../ALTEK-Link-Windows-0.1.7/src/files.c), [`image.c`]
 
 ## Calls and lifecycle
 
-Implemented by [`call.c`](../ALTEK-Link-Windows-0.1.7/src/call.c), `LinkService.dial`/`handle`, [`MediaActivity.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/MediaActivity.java), and [`IncomingCallActivity.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/IncomingCallActivity.java).
+Implemented by [`call.c`](../windows/src/call.c), `LinkService.dial`/`handle`, [`MediaActivity.java`](../android/src/ir/altek/link/MediaActivity.java), and [`IncomingCallActivity.java`](../android/src/ir/altek/link/IncomingCallActivity.java).
 
 - One active call slot per app. `id` is a UUID and `token` is 32 random bytes encoded as 64 lowercase hex characters.
 - Kinds shared by both sides: `audio`, `video`, `screen`. Android also implements `view`, an auto-accepted remote-camera mode gated by an armed UI state and per-contact camera permission.
@@ -76,7 +76,7 @@ Implemented by [`call.c`](../ALTEK-Link-Windows-0.1.7/src/call.c), `LinkService.
 
 ## Ordinary audio/video records
 
-Implemented by [`media.c`](../ALTEK-Link-Windows-0.1.7/src/media.c), [`camera.c`](../ALTEK-Link-Windows-0.1.7/src/camera.c), [`codec.c`](../ALTEK-Link-Windows-0.1.7/src/codec.c), [`MediaEngine.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/MediaEngine.java), `VideoCapture`, and `VideoDisplay`.
+Implemented by [`media.c`](../windows/src/media.c), [`camera.c`](../windows/src/camera.c), [`codec.c`](../windows/src/codec.c), [`MediaEngine.java`](../android/src/ir/altek/link/MediaEngine.java), `VideoCapture`, and `VideoDisplay`.
 
 | Kind byte | Payload after kind |
 | --- | --- |
@@ -91,7 +91,7 @@ Implemented by [`media.c`](../ALTEK-Link-Windows-0.1.7/src/media.c), [`camera.c`
 
 ## Screen records and controls
 
-Implemented by [`screen.c`](../ALTEK-Link-Windows-0.1.7/src/screen.c), [`ScreenEngine.java`](../ALTEK-Link-0.1.16/src/ir/altek/link/ScreenEngine.java), `ScreenCapture`, `RemoteControl`, and `RemoteControlActivity`. `screen` reuses the outer length framing but not the ordinary media payload layout.
+Implemented by [`screen.c`](../windows/src/screen.c), [`ScreenEngine.java`](../android/src/ir/altek/link/ScreenEngine.java), `ScreenCapture`, `RemoteControl`, and `RemoteControlActivity`. `screen` reuses the outer length framing but not the ordinary media payload layout.
 
 | Kind | Payload |
 | --- | --- |
@@ -106,11 +106,11 @@ Control numbers and big-endian fields:
 - 4 pinch: `centerX,centerY,scale:f32`; 5/6/7 left mouse down/move/up and 8/9 right down/up: `x,y:f32`; 13 keyboard: `virtualKey:i32,down:i32`.
 - Windows additionally sends/handles 10 vertical wheel and 11 horizontal wheel: `x,y:f32,delta:i32`. Android `ScreenEngine.readLoop` does not handle 10/11, so wheel input from a Windows controller is currently ignored by Android. Both sides handle 1-9 and 13 as receivers, although not every platform UI emits every operation.
 - Coordinates are normalized 0..1. Screen frame queues deliberately drop old frames under backpressure; control queues are bounded and treated as higher priority.
-- Windows desktop sharing uses OpenH264 `SCREEN_CONTENT_REAL_TIME`; `screen_quality=1` selects quality rate control (`0` selects bitrate control). `%LOCALAPPDATA%\ALTEK-Link\settings.ini` stores `screen_width`, `screen_height`, `screen_fps`, `screen_bitrate`, `screen_quality`, `screen_iframe` (frame count), `screen_threads`, and `screen_frame_skip`; the defaults are native desktop size, 4 fps, 4,000,000 bit/s target, quality control, a 4-frame intra period, one encoder thread, and frame skipping enabled. These are local encoder policy, not wire fields, and changes take effect after restart. The optional raw `screen.h264` diagnostic dump is compiled out by default. A commented reference file is checked in as `ALTEK-Link-Windows-0.1.7/settings.example.ini`.
+- Windows desktop sharing uses OpenH264 `SCREEN_CONTENT_REAL_TIME`; `screen_quality=1` selects quality rate control (`0` selects bitrate control). `%LOCALAPPDATA%\ALTEK-Link\settings.ini` stores `screen_width`, `screen_height`, `screen_fps`, `screen_bitrate`, `screen_quality`, `screen_iframe` (frame count), `screen_threads`, and `screen_frame_skip`; the defaults are native desktop size, 4 fps, 4,000,000 bit/s target, quality control, a 4-frame intra period, one encoder thread, and frame skipping enabled. These are local encoder policy, not wire fields, and changes take effect after restart. The optional raw `screen.h264` diagnostic dump is compiled out by default. A commented reference file is checked in as `windows/settings.example.ini`.
 
 ## Versioning, compatibility, and unresolved evidence
 
 - The wire version remains 1 across Android and Windows; profile and screen-control additions are additive under that version. Older peers may ignore unknown JSON fields or control operations.
-- Windows 0.1.7 corrected its outgoing screen format/frame layout to match Android. The historical [`CHANGES-0.1.7.md`](../ALTEK-Link-Windows-0.1.7/CHANGES-0.1.7.md) says it had not been rebuilt at that time; the current source subsequently built successfully with `build-vs2010.bat x86` and `build-tdm.bat x64` on 2026-10-30. Runtime interoperability remains pending.
+- Windows 0.1.7 corrected its outgoing screen format/frame layout to match Android. The historical [`CHANGES-0.1.7.md`](../windows/CHANGES-0.1.7.md) says it had not been rebuilt at that time; the current source subsequently built successfully with `build-vs2010.bat x86` and `build-tdm.bat x64` on 2026-10-30. Runtime interoperability remains pending.
 - Android release identity is 0.1.16 throughout the active source. This does not alter wire `v=1`.
 - Existing architecture/test reports describe intended and earlier validated behavior. Where they disagree with active source (for example older 10 fps/250 kbps video defaults or a shorter screen-control table), this document follows the active source.
