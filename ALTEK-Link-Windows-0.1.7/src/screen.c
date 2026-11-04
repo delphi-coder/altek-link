@@ -81,6 +81,70 @@ static unsigned __stdcall screen_keepalive(void *arg)
     return 0;
 }
 
+/* Wire IDs are independent of Windows resource IDs. Unknown custom cursors
+ * fall back to the arrow; standard cursors follow the viewer's system theme. */
+LPCWSTR screen_cursor_resource(int id)
+{
+    static const int resources[] = {0, 32512, 32513, 32514, 32515, 32516,
+                                    32642, 32643, 32644, 32645, 32646,
+                                    32648, 32649, 32650, 32651};
+    if (id < 1 || id >= (int)countof(resources))
+    {
+        return NULL;
+    }
+    return MAKEINTRESOURCEW(resources[id]);
+}
+
+static unsigned __stdcall screen_cursor_watch(void *arg)
+{
+    struct call *c = (struct call *)arg;
+    HCURSOR standard[15];
+    int i, last = -1;
+    for (i = 1; i < (int)countof(standard); i++)
+    {
+        standard[i] = LoadCursorW(NULL, screen_cursor_resource(i));
+    }
+    while (!c->stop && app.running)
+    {
+        CURSORINFO info;
+        int id = 1;
+        memset(&info, 0, sizeof(info));
+        info.cbSize = sizeof(info);
+        if (GetCursorInfo(&info))
+        {
+            if (!(info.flags & CURSOR_SHOWING))
+            {
+                id = 0;
+            }
+            else
+            {
+                for (i = 1; i < (int)countof(standard); i++)
+                {
+                    if (standard[i] && standard[i] == info.hCursor)
+                    {
+                        id = i;
+                        break;
+                    }
+                }
+            }
+            if (id != last)
+            {
+                unsigned char packet[3];
+                packet[0] = 3;
+                packet[1] = 14;
+                packet[2] = (unsigned char)id;
+                if (!media_packet(c, packet, sizeof(packet)))
+                {
+                    break;
+                }
+                last = id;
+            }
+        }
+        Sleep(33);
+    }
+    return 0;
+}
+
 #if SCREEN_H264_DUMP
 static FILE *dump_h264_open(const WCHAR *leaf)
 {
@@ -749,7 +813,7 @@ int screen_send_keycode(int vk, int down)
 
 void screen_run(struct call *c)
 {
-    HANDLE cap = NULL, ping = NULL;
+    HANDLE cap = NULL, ping = NULL, cursor = NULL;
     struct codec *dec = NULL;
     int timeout = 15000, len, bw, bh;
     ULONGLONG last = GetTickCount64();
@@ -781,6 +845,7 @@ void screen_run(struct call *c)
     {
         /* Shared side: capture this desktop and share it. */
         cap = (HANDLE)_beginthreadex(NULL, 0, screen_capture, c, 0, NULL);
+        cursor = (HANDLE)_beginthreadex(NULL, 0, screen_cursor_watch, c, 0, NULL);
         if (!cap)
         {
             notice("Screen capture unavailable");
@@ -822,6 +887,10 @@ void screen_run(struct call *c)
             }
             break;
         case 3: /* control */
+            if (c->outgoing && len == 3 && b[1] == 14 && b[2] <= 14)
+            {
+                ui_remote_cursor(b[2]);
+            }
             if (!c->outgoing && len >= 2)
             {
                 control_exec(b[1], b, len);
@@ -871,6 +940,11 @@ void screen_run(struct call *c)
     {
         WaitForSingleObject(ping, INFINITE);
         CloseHandle(ping);
+    }
+    if (cursor)
+    {
+        WaitForSingleObject(cursor, INFINITE);
+        CloseHandle(cursor);
     }
     codec_close(dec);
     EnterCriticalSection(&app.lock);

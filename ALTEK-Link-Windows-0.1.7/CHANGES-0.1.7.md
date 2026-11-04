@@ -1,5 +1,15 @@
 # 0.1.7 - fix: phones could not see the shared desktop
 
+## Build 14
+
+- Added continuous remote mouse-move delivery and separate cursor-shape updates for Windows
+  desktop sharing.
+- Avoided unnecessary chat repaints when no visible message or transfer state changed.
+- Fixed a four-second Windows UI stall by taking a snapshot of discovery data under `app.lock`
+  and performing UDP broadcast/unicast sends only after releasing the lock. This was runtime-tested
+  on the affected Windows system.
+- Removed the temporary screen-performance instrumentation from the release build.
+
 ## Build 7
 
 - Kept architecture-matched OpenH264 runtime DLLs permanently beside their release/debug EXE

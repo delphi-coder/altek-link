@@ -370,9 +370,10 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         _snprintf(version, sizeof(version) - 1, "Version %s", APP_VERSION_BUILD);
         version[sizeof(version) - 1] = 0;
         wide(version, w, countof(w));
-        ui_control(h, L"STATIC", w, SS_CENTER, 0, 195, 526, 270, 22);
-        ui_control(h, L"BUTTON", L"Open data folder", BS_PUSHBUTTON, 13, 20, 552, 170, 34);
-        ui_control(h, L"BUTTON", L"Save", BS_DEFPUSHBUTTON, 14, 345, 552, 120, 34);
+        ui_control(h, L"STATIC", w, SS_CENTER, 0, 195, 538, 270, 22);
+        ui_control(h, L"BUTTON", L"Open data folder", BS_PUSHBUTTON, 13, 20, 564, 160, 34);
+        ui_control(h, L"BUTTON", L"Open settings.ini", BS_PUSHBUTTON, 17, 190, 564, 145, 34);
+        ui_control(h, L"BUTTON", L"Save", BS_DEFPUSHBUTTON, 14, 345, 564, 120, 34);
         return 0;
     }
     if (msg == WM_COMMAND)
@@ -404,6 +405,15 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         if (id == 13)
         {
             ShellExecuteW(h, L"open", app.dir, NULL, NULL, SW_SHOWNORMAL);
+        }
+        if (id == 17)
+        {
+            WCHAR path[MAX_PATH];
+            path_join(path, app.dir, L"settings.ini");
+            if ((INT_PTR)ShellExecuteW(h, L"open", path, NULL, NULL, SW_SHOWNORMAL) <= 32)
+            {
+                MessageBoxW(h, L"Could not open settings.ini.", L"ALTEK Link", MB_ICONERROR);
+            }
         }
         if (id == 14)
         {
@@ -494,5 +504,5 @@ void ui_settings(HWND parent)
     settings_window =
         CreateWindowExW(WS_EX_DLGMODALFRAME, wc.lpszClassName, L"ALTEK Link - Settings",
                         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, CW_USEDEFAULT,
-                        CW_USEDEFAULT, 500, 638, parent, NULL, app.instance, NULL);
+                        CW_USEDEFAULT, 500, 650, parent, NULL, app.instance, NULL);
 }

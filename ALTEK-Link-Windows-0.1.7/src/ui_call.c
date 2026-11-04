@@ -17,6 +17,16 @@ static int remote_button = 0;
 static int view_mode = 0;
 static int scr_x = 0, scr_y = 0;
 static int controls_incoming = -1, controls_nav = -1, controls_fullscreen = -1;
+static LONG remote_cursor = 1;
+
+void ui_remote_cursor(int id)
+{
+    InterlockedExchange(&remote_cursor, id);
+    if (ui_call)
+    {
+        PostMessageW(ui_call, UI_REMOTE_CURSOR, 0, 0);
+    }
+}
 
 static void video_area(HWND hwnd, RECT *area)
 {
@@ -303,6 +313,35 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
     }
+    if (msg == UI_REMOTE_CURSOR)
+    {
+        POINT pt;
+        GetCursorPos(&pt);
+        if (WindowFromPoint(pt) == hwnd)
+        {
+            SendMessageW(hwnd, WM_SETCURSOR, (WPARAM)hwnd, MAKELPARAM(HTCLIENT, WM_MOUSEMOVE));
+        }
+        return 0;
+    }
+    if (msg == WM_SETCURSOR && LOWORD(lp) == HTCLIENT && (HWND)wp == hwnd)
+    {
+        POINT pt;
+        float nx = 0, ny = 0;
+        int screen;
+        EnterCriticalSection(&app.lock);
+        screen = app.call && app.call->outgoing && app.call->media_started &&
+                 !strcmp(app.call->kind, "screen");
+        LeaveCriticalSection(&app.lock);
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd, &pt);
+        if (screen && video_norm(pt.x, pt.y, &nx, &ny))
+        {
+            int id = (int)InterlockedCompareExchange(&remote_cursor, 0, 0);
+            LPCWSTR resource = screen_cursor_resource(id);
+            SetCursor(resource ? LoadCursorW(NULL, resource) : NULL);
+            return TRUE;
+        }
+    }
     if (msg == WM_TIMER)
     {
         int incoming = 0, nav = 0;
@@ -576,26 +615,18 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     if (msg == WM_MOUSEMOVE)
     {
-        ui_screen_fullscreen_pointer(hwnd, (int)LOWORD(lp), (int)HIWORD(lp));
+        int mx = (short)LOWORD(lp), my = (short)HIWORD(lp);
+        ui_screen_fullscreen_pointer(hwnd, mx, my);
         if (down_px >= 0)
         {
-            int mx = (int)LOWORD(lp), my = (int)HIWORD(lp);
             if (abs(mx - down_px) > 6 || abs(my - down_py) > 6)
             {
                 dragging = 1;
             }
-            if (remote_button == 1)
-            {
-                float nx = 0, ny = 0;
-                if (video_norm(mx, my, &nx, &ny))
-                {
-                    screen_send_mouse(6, nx, ny);
-                }
-            }
         }
-        else if (remote_button == 2)
+        if (app.call && app.call->outgoing && !strcmp(app.call->kind, "screen") &&
+            app.call->media_started)
         {
-            int mx = (int)LOWORD(lp), my = (int)HIWORD(lp);
             float nx = 0, ny = 0;
             if (video_norm(mx, my, &nx, &ny))
             {
@@ -687,6 +718,7 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     if (msg == WM_DESTROY)
     {
+        InterlockedExchange(&remote_cursor, 1);
         ui_screen_fullscreen_destroy(hwnd);
         KillTimer(hwnd, 1);
         ui_call = NULL;

@@ -63,6 +63,7 @@
 #define UI_NOTICE (WM_APP + 2)
 #define UI_FRAME (WM_APP + 3)
 #define UI_TRAY (WM_APP + 4)
+#define UI_REMOTE_CURSOR (WM_APP + 5)
 #define countof(x) (sizeof(x) / sizeof((x)[0]))
 struct peer
 {
@@ -190,6 +191,8 @@ int screen_send_wheel(float x, float y, int delta, int horiz);
 int screen_send_keycode(int vk, int down);
 int media_packet(struct call *c, const void *data, int len);
 void video_present(const unsigned char *rgb, int w, int h, int preview);
+LPCWSTR screen_cursor_resource(int id);
+void ui_remote_cursor(int id);
 struct codec;
 struct codec_encoder_config
 {

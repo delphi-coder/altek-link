@@ -371,24 +371,39 @@ static unsigned __stdcall discovery_loop(void *arg)
 static void announce(void)
 {
     char b[2049], cert[1200], *q;
+    char id[65], name[256], avatar[65], ips[MAX_PEERS][64];
     struct sockaddr_in a;
     ULONG bytes = 0;
     IP_ADAPTER_INFO *ad, *p;
-    int i;
+    int i, ip_count = 0;
     int len;
     cert[0] = 0;
     tls_identity_certificate(cert, sizeof(cert));
+    /* Never hold the global application lock while calling Winsock.  In
+     * particular, UDP broadcast can occasionally block inside old Windows
+     * network drivers.  UI painting also takes app.lock, so the old code
+     * turned that network delay into a visible application/Desktop stall. */
     EnterCriticalSection(&app.lock);
-    q = json_quote(app.name);
+    copy_s(id, sizeof(id), app.id);
+    copy_s(name, sizeof(name), app.name);
+    copy_s(avatar, sizeof(avatar), app.avatar);
+    for (i = 0; i < app.peer_count && ip_count < MAX_PEERS; i++)
+    {
+        if (!app.peers[i].blocked)
+        {
+            copy_s(ips[ip_count++], sizeof(ips[0]), app.peers[i].ip);
+        }
+    }
+    LeaveCriticalSection(&app.lock);
+    q = json_quote(name);
     if (!q)
     {
-        LeaveCriticalSection(&app.lock);
         return;
     }
     _snprintf(
         b, sizeof(b),
         "{\"app\":\"ALTEK_LINK\",\"v\":1,\"id\":\"%s\",\"name\":%s,\"avatar\":\"%s\",\"cert\":\"%s\"}",
-        app.id, q, app.avatar, cert);
+        id, q, avatar, cert);
     b[sizeof(b) - 1] = 0;
     free(q);
     len = (int)strlen(b);
@@ -397,15 +412,11 @@ static void announce(void)
     a.sin_port = htons(DISCOVERY_PORT);
     a.sin_addr.s_addr = INADDR_BROADCAST;
     sendto(app.discovery_socket, b, len, 0, (struct sockaddr *)&a, sizeof(a));
-    for (i = 0; i < app.peer_count; i++)
+    for (i = 0; i < ip_count; i++)
     {
-        if (!app.peers[i].blocked)
-        {
-            a.sin_addr.s_addr = inet_addr(app.peers[i].ip);
-            sendto(app.discovery_socket, b, len, 0, (struct sockaddr *)&a, sizeof(a));
-        }
+        a.sin_addr.s_addr = inet_addr(ips[i]);
+        sendto(app.discovery_socket, b, len, 0, (struct sockaddr *)&a, sizeof(a));
     }
-    LeaveCriticalSection(&app.lock);
 
     GetAdaptersInfo(NULL, &bytes);
     ad = (IP_ADAPTER_INFO *)malloc(bytes);

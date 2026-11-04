@@ -1542,8 +1542,31 @@ void ui_chat_register(void)
 }
 void ui_chat_refresh(void)
 {
+    static unsigned __int64 old_sig;
+    unsigned __int64 sig = 1469598103934665603ULL;
+    int count, i;
     int peer_changed = strcmp(old_peer, ui_peer) != 0;
-    if (old_count != app.message_count || peer_changed)
+    const char *p;
+    EnterCriticalSection(&app.lock);
+    count = app.message_count;
+    for (i = 0; i < count; i++)
+    {
+        struct message *m = app.messages[i];
+        if (strcmp(m->peer, ui_peer))
+        {
+            continue;
+        }
+        for (p = m->id; *p; p++)
+        {
+            sig = (sig ^ (unsigned char)*p) * 1099511628211ULL;
+        }
+        for (p = m->state; *p; p++)
+        {
+            sig = (sig ^ (unsigned char)*p) * 1099511628211ULL;
+        }
+    }
+    LeaveCriticalSection(&app.lock);
+    if (old_count != count || peer_changed || old_sig != sig)
     {
         RECT r;
         int at_bottom;
@@ -1556,7 +1579,8 @@ void ui_chat_refresh(void)
             press_item = press_btn = hover_item = hover_btn = -1;
         }
         copy_s(old_peer, 65, ui_peer);
-        old_count = app.message_count;
+        old_count = count;
+        old_sig = sig;
         InvalidateRect(ui_chat, NULL, FALSE);
         UpdateWindow(ui_chat);
         if (peer_changed || at_bottom)
@@ -1568,5 +1592,4 @@ void ui_chat_refresh(void)
             }
         }
     }
-    InvalidateRect(ui_chat, NULL, FALSE);
 }
