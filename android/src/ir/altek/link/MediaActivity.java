@@ -8,7 +8,13 @@ import android.widget.*;
 
 /** Calls require a visible media screen. Camera mode intentionally keeps screen on. */
 public final class MediaActivity extends Activity implements TextureView.SurfaceTextureListener {
-  private TextureView surface;
+  private TextureView surface, preview;
+  private FrameLayout frame;
+  private boolean videoCall, swapped, smallVisible = true, moved;
+  private float touchX, touchY, startLeft, startTop;
+  private int smallLeft = -1, smallTop = -1;
+  private long lastSmallTap;
+
   private Surface output;
   private int videoWidth = 320, videoHeight = 240;
   private TextView info;
@@ -45,9 +51,19 @@ public final class MediaActivity extends Activity implements TextureView.Surface
     surface = new TextureView(this);
     surface.setOpaque(false);
     surface.setSurfaceTextureListener(this);
-    FrameLayout frame = new FrameLayout(this);
+    frame = new FrameLayout(this);
     frame.setBackgroundColor(android.graphics.Color.BLACK);
     frame.addView(surface, new FrameLayout.LayoutParams(-1, -1));
+    preview = new TextureView(this);
+    preview.setOpaque(false);
+    frame.addView(preview, new FrameLayout.LayoutParams(dp(120), dp(160), Gravity.TOP | Gravity.LEFT));
+    preview.setAlpha(.01f);
+    View.OnTouchListener videoTouch = new View.OnTouchListener() {
+      public boolean onTouch(View v, MotionEvent e) { return touchVideo(v, e); }
+    };
+    surface.setOnTouchListener(videoTouch);
+    preview.setOnTouchListener(videoTouch);
+
     root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
     LinearLayout buttons = new LinearLayout(this);
     buttons.setBackgroundColor(0xff172a2b);
@@ -111,6 +127,53 @@ public final class MediaActivity extends Activity implements TextureView.Surface
     end.setBackgroundColor(0xffbc303b);
     setContentView(root);
     updateControls();
+  }
+
+  private void layoutVideo() {
+    if (!videoCall || frame.getWidth() == 0 || frame.getHeight() == 0) return;
+    int w = Math.min(dp(120), frame.getWidth()), h = Math.min(dp(160), frame.getHeight());
+    if (smallLeft < 0) { smallLeft = Math.max(0, frame.getWidth() - w - dp(12)); smallTop = dp(12); }
+    smallLeft = Math.max(0, Math.min(smallLeft, frame.getWidth() - w));
+    smallTop = Math.max(0, Math.min(smallTop, frame.getHeight() - h));
+    TextureView big = swapped ? preview : surface;
+    TextureView small = swapped ? surface : preview;
+    big.setLayoutParams(new FrameLayout.LayoutParams(-1, -1));
+    FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(w, h, Gravity.TOP | Gravity.LEFT);
+    lp.leftMargin = smallLeft; lp.topMargin = smallTop;
+    small.setLayoutParams(lp);
+    big.setAlpha(1f); small.setAlpha(smallVisible ? 1f : 0f);
+    big.bringToFront(); small.bringToFront();
+    transformVideo();
+  }
+
+  private boolean touchVideo(View v, MotionEvent e) {
+    if (!videoCall) return false;
+    boolean small = v == (swapped ? surface : preview) && smallVisible;
+    switch (e.getActionMasked()) {
+      case MotionEvent.ACTION_DOWN:
+        if (!small && v != (swapped ? preview : surface)) return false;
+        touchX = e.getRawX(); touchY = e.getRawY(); startLeft = smallLeft; startTop = smallTop; moved = false;
+        return true;
+      case MotionEvent.ACTION_MOVE:
+        if (small) {
+          float dx = e.getRawX() - touchX, dy = e.getRawY() - touchY;
+          if (Math.abs(dx) > dp(5) || Math.abs(dy) > dp(5)) moved = true;
+          if (moved) { smallLeft = (int)(startLeft + dx); smallTop = (int)(startTop + dy); layoutVideo(); }
+        }
+        return true;
+      case MotionEvent.ACTION_UP:
+        if (!moved) {
+          if (small) {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastSmallTap < ViewConfiguration.getDoubleTapTimeout()) {
+              swapped = !swapped; lastSmallTap = 0; layoutVideo();
+            } else lastSmallTap = now;
+          } else { smallVisible = !smallVisible; layoutVideo(); }
+        }
+        return true;
+      case MotionEvent.ACTION_CANCEL: return true;
+    }
+    return true;
   }
 
   private int dp(int n) {
@@ -237,6 +300,7 @@ public final class MediaActivity extends Activity implements TextureView.Surface
               engine = null;
               attached = null;
               answered = false;
+              videoCall = false; preview.setAlpha(0f);
             }
             if (cameraMode) info.setText("Camera armed · waiting for an allowed viewer");
             else {
@@ -274,7 +338,11 @@ public final class MediaActivity extends Activity implements TextureView.Surface
                   1200);
               return;
             }
-          } else if (surfaceReady) {
+          } else if (surfaceReady && (!"video".equals(c.kind) || preview.isAvailable())) {
+            if ("video".equals(c.kind) && !videoCall) {
+              videoCall = true;
+              frame.post(new Runnable() { public void run() { layoutVideo(); } });
+            }
             if (!c.outgoing && !c.accepted && !answered) {
               answered = true;
               s.answer(c);
@@ -288,6 +356,7 @@ public final class MediaActivity extends Activity implements TextureView.Surface
                         MediaActivity.this,
                         c.socket,
                         output,
+                        video ? preview.getSurfaceTexture() : null,
                         video || (view && !c.outgoing),
                         video || (view && c.outgoing),
                         !view,

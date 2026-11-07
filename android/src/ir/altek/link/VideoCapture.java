@@ -28,6 +28,7 @@ public final class VideoCapture implements Camera.PreviewCallback {
   private Handler h;
   private Camera camera;
   private SurfaceTexture texture;
+  private final SurfaceTexture previewTexture;
   private MediaCodec codec;
   private ByteBuffer[] input, output;
   private int width, height, color, cameraId;
@@ -44,7 +45,8 @@ public final class VideoCapture implements Camera.PreviewCallback {
   private long next, origin, stats, frames, bytes;
   private final MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
 
-  public VideoCapture(android.content.Context context, Sink sink) {
+  public VideoCapture(android.content.Context context, SurfaceTexture previewTexture, Sink sink) {
+    this.previewTexture = previewTexture;
     this.context = context.getApplicationContext();
     this.sink = sink;
     thread.start();
@@ -183,7 +185,13 @@ public final class VideoCapture implements Camera.PreviewCallback {
         throw new Exception("Video memory limit");
       converted = new byte[width * height * 3 / 2];
       encoder();
-      texture = new SurfaceTexture(10);
+      texture = previewTexture != null ? previewTexture : new SurfaceTexture(10);
+      if (previewTexture != null) {
+        int rotation = ((android.view.WindowManager) context.getSystemService(android.content.Context.WINDOW_SERVICE)).getDefaultDisplay().getRotation();
+        int degrees = rotation == 1 ? 90 : rotation == 2 ? 180 : rotation == 3 ? 270 : 0;
+        int orientation = frontCamera ? (360 - (details.orientation + degrees) % 360) % 360 : (details.orientation - degrees + 360) % 360;
+        camera.setDisplayOrientation(orientation);
+      }
       camera.setPreviewTexture(texture);
       for (int i = 0; i < 3; i++) camera.addCallbackBuffer(new byte[converted.length]);
       camera.setPreviewCallbackWithBuffer(this);
@@ -445,13 +453,13 @@ public final class VideoCapture implements Camera.PreviewCallback {
       }
       codec = null;
     }
-    if (texture != null) {
+    if (texture != null && texture != previewTexture) {
       try {
         texture.release();
       } catch (Exception ignored) {
       }
-      texture = null;
     }
+    texture = null;
     config = null;
     converted = null;
     input = null;

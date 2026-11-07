@@ -62,6 +62,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
   private boolean pinching;
   private float startDist, startZoom;
   private ImageButton zoomBtn;
+  private final RemoteTap remoteTap = new RemoteTap();
   private boolean remotePinchActive;
   private boolean remotePinchHappened;
   private float remotePinchPrevDist;
@@ -76,6 +77,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
         public void run() {
           if (engine == null || attached == null || !attached.outgoing) return;
           if (dragging || remotePinchActive || pinching) return;
+          remoteTap.reset();
           if (zoomMode) {
             float[] pt = stageToRemote(downRawX, downRawY);
             if (pt != null) {
@@ -380,6 +382,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
 
   /** Viewer-side cleanup only; the sharing side has nothing local to tear down any more. */
   private void teardown() {
+    remoteTap.reset();
     if (engine != null) {
       engine.stop();
       engine = null;
@@ -524,6 +527,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
         return true;
       case MotionEvent.ACTION_POINTER_DOWN:
         if (twoFingers) {
+          remoteTap.reset();
           remotePinchActive = true;
           remotePinchHappened = false;
           remotePinchPrevDist = pointerDistance(e);
@@ -572,6 +576,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
           float dx = (nx - downX) * w, dy = (ny - downY) * h;
           if (Math.abs(dx) > dp(8) || Math.abs(dy) > dp(8)) {
             dragging = true;
+            remoteTap.reset();
             lpHandler.removeCallbacks(longPressRunnable);
             if (leftDownPending) {
               // Drag confirmed: start the left-button session at the down point.
@@ -598,10 +603,11 @@ public final class RemoteControlActivity extends Activity implements TextureView
           return true;
         }
         if (leftDownPending) {
-          // Quick tap with no drag: emit a full click at this point.
-          engine.sendMouseDown(downX, downY);
-          engine.sendMouseUp(nx, ny);
-          DebugLog.event("SEND_TAP_CLICK", "nx=" + nx + " ny=" + ny);
+          // Keep two nearby taps at the same remote point despite normal finger jitter.
+          float[] point = remoteTap.position(SystemClock.uptimeMillis(), downX, downY, w, h, dp(24));
+          engine.sendMouseDown(point[0], point[1]);
+          engine.sendMouseUp(point[0], point[1]);
+          DebugLog.event("SEND_TAP_CLICK", "nx=" + point[0] + " ny=" + point[1]);
           leftDownPending = false;
           return true;
         }
@@ -613,6 +619,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
         return true;
       case MotionEvent.ACTION_CANCEL:
         lpHandler.removeCallbacks(longPressRunnable);
+        remoteTap.reset();
         leftDownPending = false;
         if (mouseDownSent) {
           engine.sendMouseUp(nx, ny);
@@ -786,6 +793,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
   }
 
   private void toggleZoom() {
+    remoteTap.reset();
     // Only flip the mode: the current zoom/pan must persist, otherwise the user would
     // have to "fall out" of zoom to make touches selectable and lose what they zoomed on.
     zoomMode = !zoomMode;

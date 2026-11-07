@@ -69,7 +69,7 @@ public final class LinkService extends Service {
 
   public static final class Call {
     public String id, peer, ip, kind, token;
-    public boolean outgoing, accepted;
+    public boolean outgoing, accepted, autoScreen;
     public long started;
     public volatile SSLSocket socket;
   }
@@ -189,7 +189,7 @@ public final class LinkService extends Service {
       }
       if (!live) return;
       DebugLog.init(this, identity.id);
-      DebugLog.event("SERVICE", "Starting API=" + Build.VERSION.SDK_INT + " version=0.1.16");
+      DebugLog.event("SERVICE", "Starting API=" + Build.VERSION.SDK_INT + " version=0.1.17");
       server = (SSLServerSocket) identity.tls.getServerSocketFactory().createServerSocket();
       server.setReuseAddress(true);
       server.bind(new InetSocketAddress(Wire.PORT));
@@ -394,6 +394,14 @@ public final class LinkService extends Service {
         c.started = System.currentTimeMillis();
         if (!Arrays.asList("audio", "video", "view", "screen").contains(c.kind)
             || !c.token.matches("[0-9a-f]{64}")) throw new IOException("Bad call");
+        // Re-check the actual root grant on every automatic request: it may have been revoked
+        // since permission was enabled. A failed check must leave the normal call flow intact.
+        boolean remoteRootReady = "screen".equals(c.kind) && p.remote
+            && RootShell.probeAvailable().granted;
+        if ("screen".equals(c.kind) && p.remote && !remoteRootReady) {
+          db.remote(peerId, false);
+          change();
+        }
         synchronized (this) {
           if (call != null) {
             reply(out, false, "Busy");
@@ -407,7 +415,9 @@ public final class LinkService extends Service {
           }
           lastCallFailure = "";
           call = c;
-          c.accepted = "view".equals(c.kind);
+          Store.Peer latestPeer = db.peer(peerId);
+          c.autoScreen = remoteRootReady && latestPeer != null && latestPeer.approved && latestPeer.remote;
+          c.accepted = "view".equals(c.kind) || c.autoScreen;
         }
         reply(out, true, "");
         DebugLog.event("CALL_RX", "kind=" + c.kind + " peer=" + shortId(peerId));
@@ -476,6 +486,7 @@ public final class LinkService extends Service {
           handoff = true;
         }
         change();
+        if (c.autoScreen) beginScreenShare(c, null);
       } else reply(out, false, "Unknown operation");
     } catch (Exception e) {
       if (live) DebugLog.error("REQUEST", e);
@@ -982,6 +993,10 @@ public final class LinkService extends Service {
               public void keyEvent(int vk, int down) {
                 r.keyEvent(vk, down);
               }
+
+              public void textInput(String text) {
+                r.textInput(text);
+              }
             },
             new ScreenEngine.Listener() {
               public void status(String text) {
@@ -994,6 +1009,7 @@ public final class LinkService extends Service {
               }
             });
     final ScreenEngine e = screenEngine;
+    if (Build.VERSION.SDK_INT >= 21 && ControlAccessibilityService.enabled()) e.sendTextCapability();
     ScreenCapture.Sink sink =
         new ScreenCapture.Sink() {
           public void format(boolean h264, int w, int h, byte[] config) {
@@ -1001,7 +1017,10 @@ public final class LinkService extends Service {
           }
 
           public void frame(boolean key, long pts, byte[] bytes) {
-            e.sendFrame(key, pts, bytes);
+            if (e.sendFrame(key, pts, bytes)) {
+              ScreenCapture capture = screenCapture;
+              if (capture != null) capture.requestSyncFrame();
+            }
           }
 
           public void status(String text) {

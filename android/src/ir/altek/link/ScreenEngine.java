@@ -48,6 +48,8 @@ public final class ScreenEngine {
 
     /** Hardware key forwarding: PC virtual-key code and down(true)/up(false). */
     void keyEvent(int vk, int down);
+
+    void textInput(String text);
   }
 
   public interface Listener {
@@ -63,10 +65,8 @@ public final class ScreenEngine {
   private final ControlListener control;
   private final Listener listener;
   private volatile boolean running = true;
-  // Frames can be bulky; drop the oldest under backpressure rather than build up latency.
-  private final ArrayBlockingQueue<byte[]> frameQueue = new ArrayBlockingQueue<byte[]>(2);
-  // Control packets are small and matter more; give them more room and never drop them here.
-  private final ArrayBlockingQueue<byte[]> controlQueue = new ArrayBlockingQueue<byte[]>(32);
+  // Controls have priority, and either queue wakes the writer immediately.
+  private final ScreenPacketQueue packets = new ScreenPacketQueue();
 
   public ScreenEngine(
       SSLSocket socket, FrameListener frames, ControlListener control, Listener listener) {
@@ -93,6 +93,10 @@ public final class ScreenEngine {
         .start();
   }
 
+  public void sendTextCapability() {
+    enqueueControl(new byte[] { KIND_CONTROL, 16, 1 });
+  }
+
   public void sendFormat(boolean h264, int w, int h, byte[] config) {
     try {
       ByteArrayOutputStream b = new ByteArrayOutputStream();
@@ -102,13 +106,13 @@ public final class ScreenEngine {
       o.writeInt(w);
       o.writeInt(h);
       if (h264 && config != null) o.write(config);
-      enqueueFrame(b.toByteArray());
+      if (running) packets.offerFormat(b.toByteArray(), h264);
     } catch (Exception e) {
       error(e);
     }
   }
 
-  public void sendFrame(boolean keyFrame, long ptsMicros, byte[] bytes) {
+  public boolean sendFrame(boolean keyFrame, long ptsMicros, byte[] bytes) {
     try {
       ByteArrayOutputStream b = new ByteArrayOutputStream();
       DataOutputStream o = new DataOutputStream(b);
@@ -116,9 +120,10 @@ public final class ScreenEngine {
       o.writeByte(keyFrame ? 1 : 0);
       o.writeLong(ptsMicros);
       o.write(bytes);
-      enqueueFrame(b.toByteArray());
+      return running && packets.offerFrame(b.toByteArray(), keyFrame);
     } catch (Exception e) {
       error(e);
+      return false;
     }
   }
 
@@ -217,25 +222,16 @@ public final class ScreenEngine {
     }
   }
 
-  private void enqueueFrame(byte[] b) {
-    if (!running) return;
-    if (!frameQueue.offer(b)) {
-      frameQueue.poll();
-      frameQueue.offer(b);
-    }
-  }
-
   private void enqueueControl(byte[] b) {
-    if (running && !controlQueue.offer(b)) error(new IOException("Control channel too slow"));
+    if (running && !packets.offerControl(b)) error(new IOException("Control channel too slow"));
   }
 
   private void writeLoop() {
     try {
       DataOutputStream out = new DataOutputStream(socket.getOutputStream());
       while (running) {
-        // Control gestures are small and latency-sensitive: always send any waiting one first.
-        byte[] b = controlQueue.poll();
-        if (b == null) b = frameQueue.poll(300, TimeUnit.MILLISECONDS);
+        byte[] b = packets.take(2000);
+        if (!running) break;
         if (b == null) b = new byte[] {0};
         Wire.write(out, b);
       }
@@ -300,6 +296,10 @@ public final class ScreenEngine {
           } else if (op == 9) {
             float x = packet.readFloat(), y = packet.readFloat();
             if (control != null) control.mouseRightUp(x, y);
+          } else if (op == 15 && b.length > 2 && b.length <= 66) {
+            byte[] text = new byte[b.length - 2];
+            packet.readFully(text);
+            if (control != null) control.textInput(new String(text, "UTF-8"));
           } else if (op == 13) {
             int vk = packet.readInt(), down = packet.readInt();
             if (control != null) control.keyEvent(vk, down);
@@ -320,6 +320,7 @@ public final class ScreenEngine {
   public void stop() {
     if (!running) return;
     running = false;
+    packets.close();
     Wire.close(socket);
   }
 }

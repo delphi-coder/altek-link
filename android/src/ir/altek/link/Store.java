@@ -7,13 +7,13 @@ import java.util.*;
 
 public final class Store extends SQLiteOpenHelper {
   public Store(Context c) {
-    super(c, "link.db", null, 2);
+    super(c, "link.db", null, 3);
   }
 
   public void onCreate(SQLiteDatabase d) {
     d.execSQL(
         "CREATE TABLE peers(id TEXT PRIMARY KEY,name TEXT,ip TEXT,seen INTEGER,approved INTEGER"
-            + " DEFAULT 1,camera INTEGER DEFAULT 0)");
+            + " DEFAULT 1,camera INTEGER DEFAULT 0,remote INTEGER DEFAULT 0)");
     d.execSQL(
         "CREATE TABLE messages(id TEXT PRIMARY KEY,peer TEXT,kind TEXT,body TEXT,path TEXT,mine"
             + " INTEGER,state TEXT,time INTEGER)");
@@ -22,12 +22,13 @@ public final class Store extends SQLiteOpenHelper {
 
   public void onUpgrade(SQLiteDatabase d, int a, int b) {
     if (a < 2) d.execSQL("UPDATE peers SET approved=1");
+    if (a < 3) d.execSQL("ALTER TABLE peers ADD COLUMN remote INTEGER DEFAULT 0");
   }
 
   public static class Peer {
     public String id, name, ip;
     public long seen;
-    public boolean approved, camera;
+    public boolean approved, camera, remote;
 
     public boolean online() {
       return System.currentTimeMillis() - seen < 16000;
@@ -57,13 +58,19 @@ public final class Store extends SQLiteOpenHelper {
   public synchronized void trust(String id, boolean yes) {
     ContentValues v = new ContentValues();
     v.put("approved", yes ? 1 : 0);
-    if (!yes) v.put("camera", 0);
+    if (!yes) { v.put("camera", 0); v.put("remote", 0); }
     getWritableDatabase().update("peers", v, "id=?", new String[] {id});
   }
 
   public synchronized void camera(String id, boolean yes) {
     ContentValues v = new ContentValues();
     v.put("camera", yes ? 1 : 0);
+    getWritableDatabase().update("peers", v, "id=?", new String[] {id});
+  }
+
+  public synchronized void remote(String id, boolean yes) {
+    ContentValues v = new ContentValues();
+    v.put("remote", yes ? 1 : 0);
     getWritableDatabase().update("peers", v, "id=?", new String[] {id});
   }
 
@@ -81,6 +88,7 @@ public final class Store extends SQLiteOpenHelper {
         p.seen = c.getLong(3);
         p.approved = c.getInt(4) != 0;
         p.camera = c.getInt(5) != 0;
+        p.remote = c.getInt(6) != 0;
         r.add(p);
       }
     } finally {

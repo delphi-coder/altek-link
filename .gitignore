@@ -38,3 +38,14 @@ AGENTS.md
 docs/CODEMAP.md
 docs/STATUS.md
 TESTING.md
+
+# Current source directory build outputs
+/android/build/
+/android/gen/
+/android/bin/
+/android/*.idsig
+/android/tools/logs/
+/windows/build/
+/windows/bin/**/AltekLink.exe
+/windows/bin/**/AltekLink.pdb
+/windows/bin/**/screen.h264

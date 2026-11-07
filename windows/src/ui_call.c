@@ -510,25 +510,57 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
     }
+    if (msg == WM_ACTIVATE && LOWORD(wp) != WA_INACTIVE && app.call &&
+        app.call->outgoing && !strcmp(app.call->kind, "screen"))
+    {
+        /* Buttons can otherwise retain keyboard focus when returning to the viewer. */
+        SetFocus(hwnd);
+    }
     if (msg == WM_GETDLGCODE)
     {
         return DLGC_WANTALLKEYS;
     }
-    if (msg == WM_KEYDOWN || msg == WM_KEYUP)
+    if (msg == WM_CHAR || msg == UI_FULLSCREEN_TEXT)
+    {
+        static WCHAR high_surrogate;
+        WCHAR ch = (WCHAR)wp, pair[2];
+        if (app.call && app.call->outgoing && !strcmp(app.call->kind, "screen") &&
+            app.call->media_started && screen_remote_text_supported())
+        {
+            if (ch >= 0xd800 && ch <= 0xdbff) high_surrogate = ch;
+            else if (ch >= 0xdc00 && ch <= 0xdfff && high_surrogate)
+            {
+                pair[0] = high_surrogate; pair[1] = ch;
+                screen_send_text(pair, 2); high_surrogate = 0;
+            }
+            else
+            {
+                high_surrogate = 0;
+                if (ch >= 32 && ch != 127) screen_send_text(&ch, 1);
+            }
+        }
+        return 0;
+    }
+    if (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP)
     {
         if (app.call && app.call->outgoing && !strcmp(app.call->kind, "screen") &&
             app.call->media_started)
         {
-            screen_send_keycode((int)wp, msg == WM_KEYDOWN);
+            if (!screen_remote_text_supported() || !ui_screen_text_key((int)wp) ||
+                ((GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)))
+            {
+                if (!screen_send_keycode((int)wp, msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN))
+                    log_event("REMOTE_KEY", "send failed");
+            }
+            return 0;
         }
-        return 0;
     }
     if (msg == UI_FULLSCREEN_KEY)
     {
         if (ui_screen_fullscreen_active(hwnd) && app.call && app.call->outgoing &&
             !strcmp(app.call->kind, "screen") && app.call->media_started)
         {
-            screen_send_keycode((int)wp, lp ? 1 : 0);
+            if (!(lp & 2)) screen_send_keycode((int)wp, (lp & 1) ? 1 : 0);
         }
         return 0;
     }
@@ -558,6 +590,7 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             SetCapture(hwnd);
             if (video_norm(down_px, down_py, &nx, &ny))
             {
+                SetFocus(hwnd);
                 screen_send_mouse(5, nx, ny);
             }
             remote_button = 1;
@@ -574,6 +607,7 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             SetCapture(hwnd);
             if (video_norm(mx, my, &nx, &ny))
             {
+                SetFocus(hwnd);
                 screen_send_mouse(8, nx, ny);
             }
             remote_button = 2;

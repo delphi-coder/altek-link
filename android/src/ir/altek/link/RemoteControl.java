@@ -26,6 +26,9 @@ public final class RemoteControl {
   private final int width, height;
   private final ExecutorService exec = Executors.newSingleThreadExecutor();
   private final AtomicInteger pending = new AtomicInteger();
+  private final ThreadPoolExecutor keys = new ThreadPoolExecutor(
+      1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<Runnable>(128));
+  private boolean shiftDown, ctrlDown, capsLock;
   private volatile boolean stopped;
 
   public RemoteControl(int width, int height) {
@@ -153,14 +156,43 @@ public final class RemoteControl {
    * atomic (press+release), so we only fire it on key-down; the up half is
    * produced by the same command. Keycode mapping is PC VK -> Android.
    */
-  public void keyEvent(int vk, int down) {
+  public void keyEvent(final int vk, int down) {
+    if (vk == 0x10 || vk == 0xa0 || vk == 0xa1) { shiftDown = down != 0; return; }
+    if (vk == 0x11 || vk == 0xa2 || vk == 0xa3) { ctrlDown = down != 0; return; }
     if (down == 0) return;
-    int code = vkToAndroid(vk);
-    if (code <= 0) {
-      DebugLog.event("KEY_FWD_DROP", "vk=" + vk);
-      return;
+    if (vk == 0x14) { capsLock = !capsLock; return; }
+    final int code = vkToAndroid(vk);
+    if (code <= 0 || stopped) return;
+    final boolean shift = shiftDown, control = ctrlDown, caps = capsLock;
+    try {
+      keys.execute(new Runnable() {
+        public void run() {
+          if (stopped) return;
+          try {
+            if (ControlAccessibilityService.editKey(vk, shift, control, caps)) return;
+            // Root keyevent is an atomic key press; it cannot preserve Ctrl combinations.
+            if (!control) RootShell.run("input keyevent " + code, 4000);
+          } catch (Exception e) {
+            DebugLog.error("REMOTE_KEY", e);
+          }
+        }
+      });
+    } catch (RejectedExecutionException e) {
+      DebugLog.event("REMOTE_KEY", "keyboard queue full");
     }
-    submit("input keyevent " + code);
+  }
+
+  public void textInput(final String text) {
+    if (stopped || text == null || text.length() == 0) return;
+    try {
+      keys.execute(new Runnable() {
+        public void run() {
+          if (!stopped) ControlAccessibilityService.insertText(text);
+        }
+      });
+    } catch (RejectedExecutionException e) {
+      DebugLog.event("REMOTE_KEY", "keyboard queue full");
+    }
   }
 
   private static int vkToAndroid(int vk) {
@@ -240,5 +272,6 @@ public final class RemoteControl {
   public void stop() {
     stopped = true;
     exec.shutdownNow();
+    keys.shutdownNow();
   }
 }

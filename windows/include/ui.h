@@ -35,6 +35,8 @@
 
 #define ID_FULLSCREEN 124
 #define UI_FULLSCREEN_KEY (WM_APP + 5)
+#define UI_FULLSCREEN_TEXT (WM_APP + 6)
+int ui_screen_text_key(int vk);
 struct theme
 {
     COLORREF bar, bar_line, frame_line, chat_bg, mine_bg, select_bg;

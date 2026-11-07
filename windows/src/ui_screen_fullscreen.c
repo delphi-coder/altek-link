@@ -10,6 +10,13 @@ static HHOOK keyboard_hook;
 static WINDOWPLACEMENT restore_placement;
 static LONG restore_style, restore_ex_style;
 static int full_active, exit_visible;
+static BYTE keyboard_state[256];
+
+int ui_screen_text_key(int vk)
+{
+    return vk == VK_SPACE || (vk >= 0x30 && vk <= 0x5a) ||
+           (vk >= 0x60 && vk <= 0x6f) || (vk >= 0xba && vk <= 0xe2);
+}
 
 static void exit_rect(HWND hwnd, RECT *out)
 {
@@ -27,8 +34,33 @@ static LRESULT CALLBACK keyboard_proc(int code, WPARAM wp, LPARAM lp)
         int up = wp == WM_KEYUP || wp == WM_SYSKEYUP;
         if (down || up)
         {
-            PostMessageW(full_window, UI_FULLSCREEN_KEY, (WPARAM)key->vkCode,
-                         (LPARAM)(down ? 1 : 0));
+            UINT vk = key->vkCode;
+            int text_key, i, count;
+            WCHAR chars[8];
+            if (vk < 256)
+            {
+                if (down && vk == VK_CAPITAL && !(keyboard_state[vk] & 0x80))
+                    keyboard_state[vk] ^= 1;
+                if (down) keyboard_state[vk] |= 0x80;
+                else keyboard_state[vk] &= 0x7f;
+                if (vk == VK_LSHIFT || vk == VK_RSHIFT)
+                    keyboard_state[VK_SHIFT] = (keyboard_state[VK_LSHIFT] | keyboard_state[VK_RSHIFT]);
+                if (vk == VK_LCONTROL || vk == VK_RCONTROL)
+                    keyboard_state[VK_CONTROL] = (keyboard_state[VK_LCONTROL] | keyboard_state[VK_RCONTROL]);
+                if (vk == VK_LMENU || vk == VK_RMENU)
+                    keyboard_state[VK_MENU] = (keyboard_state[VK_LMENU] | keyboard_state[VK_RMENU]);
+            }
+            text_key = screen_remote_text_supported() && ui_screen_text_key((int)vk) &&
+                       (!(keyboard_state[VK_CONTROL] & 0x80) || (keyboard_state[VK_MENU] & 0x80));
+            PostMessageW(full_window, UI_FULLSCREEN_KEY, (WPARAM)vk,
+                         (LPARAM)((down ? 1 : 0) | (text_key ? 2 : 0)));
+            if (text_key && down)
+            {
+                HKL layout = GetKeyboardLayout(GetWindowThreadProcessId(full_window, NULL));
+                count = ToUnicodeEx(vk, key->scanCode, keyboard_state, chars, 8, 0, layout);
+                for (i = 0; i < count; i++)
+                    PostMessageW(full_window, UI_FULLSCREEN_TEXT, (WPARAM)chars[i], 0);
+            }
             return 1;
         }
     }
@@ -49,6 +81,7 @@ int ui_screen_fullscreen_enter(HWND hwnd)
         return full_window == hwnd;
     }
     full_window = hwnd;
+    GetKeyboardState(keyboard_state);
     keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, app.instance, 0);
     if (!keyboard_hook)
     {

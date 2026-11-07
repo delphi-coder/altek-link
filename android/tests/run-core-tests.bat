@@ -9,9 +9,11 @@ if not exist build\ir\altek\link\Wire.class (
  pause
  exit /b 1
 )
-javac -encoding UTF-8 -source 7 -target 7 -cp "build;%PLATFORM%" -d build tests\CoreTest.java tests\UiLogicTest.java
+javac -encoding UTF-8 -source 7 -target 7 -cp "build;%PLATFORM%" -d build tests\CoreTest.java tests\UiLogicTest.java tests\RemoteInputTest.java
 if errorlevel 1 goto fail
 java -cp "build;%PLATFORM%" ir.altek.link.UiLogicTest
+if errorlevel 1 goto fail
+java -cp "build;%PLATFORM%" ir.altek.link.RemoteInputTest
 if errorlevel 1 goto fail
 java -cp "build;%PLATFORM%" ir.altek.link.CoreTest "%TEMP%\altek-link-core-test"
 if errorlevel 1 goto fail

@@ -46,11 +46,21 @@ public final class RootShell {
    */
   public static Result probe() {
     if (grantedOnce) return new Result(true, "already granted this session");
+    return check(20000);
+  }
+
+  /** Always check the current grant; use this for security-sensitive automatic access. */
+  public static Result probeFresh() { return check(20000); }
+
+  /** Short, fresh check for an incoming call; never trust a cached earlier grant. */
+  public static Result probeAvailable() { return check(1500); }
+
+  private static Result check(long timeoutMs) {
     StringBuilder detail = new StringBuilder();
     for (String candidate : orderedCandidates()) {
       try {
         Exec e = spawn(candidate);
-        byte[] out = finish(e, "id\nexit\n".getBytes("UTF-8"), 20000);
+        byte[] out = finish(e, "id\nexit\n".getBytes("UTF-8"), timeoutMs);
         String text = new String(out, "UTF-8");
         if (text.contains("uid=0")) {
           working = candidate;
@@ -69,7 +79,7 @@ public final class RootShell {
         return new Result(
             false,
             candidate
-                + " did not respond within 20s - check your root manager app for a pending"
+                + " did not respond within " + timeoutMs + "ms - check your root manager app for a pending"
                 + " permission request");
       } catch (IOException e) {
         detail.append(candidate).append(": ").append(e.getMessage()).append("; ");

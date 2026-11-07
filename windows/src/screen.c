@@ -370,6 +370,37 @@ done:
     return 0;
 }
 
+/* Desktop icon view may be hosted by the shell's Progman or a WorkerW. Do not
+ * classify Explorer folder windows or taskbar windows as the desktop. */
+static int point_is_shell_desktop(POINT pt)
+{
+    HWND hit, root, shell;
+    DWORD root_pid = 0, shell_pid = 0;
+    WCHAR cls[64];
+    hit = WindowFromPoint(pt);
+    if (!hit)
+    {
+        return 0;
+    }
+    root = GetAncestor(hit, GA_ROOT);
+    shell = GetShellWindow();
+    if (!root || !shell)
+    {
+        return 0;
+    }
+    if (root == shell)
+    {
+        return 1;
+    }
+    GetWindowThreadProcessId(root, &root_pid);
+    GetWindowThreadProcessId(shell, &shell_pid);
+    if (!root_pid || root_pid != shell_pid || !GetClassNameW(root, cls, countof(cls)))
+    {
+        return 0;
+    }
+    return lstrcmpW(cls, L"WorkerW") == 0 || lstrcmpW(cls, L"Progman") == 0;
+}
+
 static void control_exec(int op, const unsigned char *b, int len)
 {
     float x, y, x1, y1, x2, y2;
@@ -508,7 +539,8 @@ static void control_exec(int op, const unsigned char *b, int len)
             in[0].type = INPUT_KEYBOARD;
             in[0].ki.wVk = (WORD)vk;
             in[0].ki.dwFlags = flags;
-            SendInput(1, in, sizeof(INPUT));
+            if (SendInput(1, in, sizeof(INPUT)) != 1)
+                log_event("REMOTE_KEY", "SendInput failed error=%lu", (unsigned long)GetLastError());
         }
         break;
     case 5: /* mouse down: hold the left button at the normalized point */
@@ -662,6 +694,23 @@ static void control_exec(int op, const unsigned char *b, int len)
         }
         x = beefloat(b + 2);
         y = beefloat(b + 6);
+        {
+            int mode;
+            POINT pt;
+            EnterCriticalSection(&app.lock);
+            mode = app.remote_pinch_mode;
+            LeaveCriticalSection(&app.lock);
+            if (!(x >= 0.0f && x <= 1.0f && y >= 0.0f && y <= 1.0f))
+            {
+                return;
+            }
+            pt.x = (LONG)(x * (sw - 1));
+            pt.y = (LONG)(y * (sh - 1));
+            if (mode == 2 || (mode == 1 && point_is_shell_desktop(pt)))
+            {
+                return;
+            }
+        }
         /* scale parsed here only for direction */
         SetCursorPos((int)(x * sw), (int)(y * sh));
         memset(in, 0, sizeof(in));
@@ -740,6 +789,12 @@ static void control_exec(int op, const unsigned char *b, int len)
         break;
     }
 }
+static volatile LONG remote_text_capable;
+int screen_remote_text_supported(void)
+{
+    return InterlockedCompareExchange(&remote_text_capable, 0, 0) != 0;
+}
+
 static int screen_send(const unsigned char *pkt, int len)
 {
     struct call *c;
@@ -811,6 +866,16 @@ int screen_send_keycode(int vk, int down)
     return screen_send(p, 10);
 }
 
+int screen_send_text(const WCHAR *text, int length)
+{
+    unsigned char p[66];
+    int bytes = WideCharToMultiByte(CP_UTF8, 0, text, length, (char *)p + 2, 64, NULL, NULL);
+    if (bytes <= 0) return 0;
+    p[0] = 3;
+    p[1] = 15;
+    return screen_send(p, bytes + 2);
+}
+
 void screen_run(struct call *c)
 {
     HANDLE cap = NULL, ping = NULL, cursor = NULL;
@@ -820,6 +885,7 @@ void screen_run(struct call *c)
     int frames = 0;
     unsigned char *b, *rgb;
 
+    if (c->outgoing) InterlockedExchange(&remote_text_capable, 0);
     if (!c->tls)
     {
         return;
@@ -887,6 +953,8 @@ void screen_run(struct call *c)
             }
             break;
         case 3: /* control */
+            if (c->outgoing && len == 3 && b[1] == 16 && b[2] == 1)
+                InterlockedExchange(&remote_text_capable, 1);
             if (c->outgoing && len == 3 && b[1] == 14 && b[2] <= 14)
             {
                 ui_remote_cursor(b[2]);

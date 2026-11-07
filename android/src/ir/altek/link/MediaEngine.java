@@ -39,6 +39,7 @@ public final class MediaEngine {
       Context c,
       SSLSocket s,
       Surface surface,
+      android.graphics.SurfaceTexture previewTexture,
       boolean sendVideo,
       boolean receiveVideo,
       boolean audio,
@@ -87,6 +88,7 @@ public final class MediaEngine {
           capture =
               new VideoCapture(
                   context,
+                  previewTexture,
                   new VideoCapture.Sink() {
                     public void format(int w, int h, byte[] config) {
                       try {

@@ -62,3 +62,7 @@ asks once and creates it. Never include `.local/` in a release archive.
 
 First-party ALTEK Link code is available under the MIT License. Bundled third-party components and
 artwork retain their own notices and licenses.
+
+## Version history
+
+See [CHANGELOG.md](CHANGELOG.md) for recent changes and release notes.

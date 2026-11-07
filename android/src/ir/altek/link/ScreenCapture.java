@@ -66,10 +66,12 @@ public final class ScreenCapture {
   private MediaCodec encoder;
   private VirtualDisplay virtualDisplay;
   private MediaProjection projection;
+  private ScreenOptions options;
 
   /** Root fallback: screenrecord (API 19-20) or periodic screenshots (API 16-18). */
   public ScreenCapture(final Context context, final Sink sink) {
     this.sink = sink;
+    this.options = ScreenOptions.load(context);
     final boolean stream = Build.VERSION.SDK_INT >= 19;
     thread =
         new Thread(
@@ -79,7 +81,7 @@ public final class ScreenCapture {
                   sink.status("Waiting for root access (check your root manager app)...");
                   RootShell.Result root = RootShell.probe();
                   if (!root.granted) throw new IOException("Root access not available: " + root.detail);
-                  int[] size = targetSize(context, stream ? 1280 : 720);
+                  int[] size = targetSize(context, stream ? options.maxSide : Math.min(options.maxSide, 720));
                   if (stream) streamLoop(size[0], size[1]);
                   else snapshotLoop(size[0], size[1]);
                 } catch (Exception e) {
@@ -94,13 +96,14 @@ public final class ScreenCapture {
   /** Preferred path on API 21+: no root, uses an already-approved MediaProjection. */
   public ScreenCapture(final Context context, final MediaProjection projection, final Sink sink) {
     this.sink = sink;
+    this.options = ScreenOptions.load(context);
     this.projection = projection;
     thread =
         new Thread(
             new Runnable() {
               public void run() {
                 try {
-                  int[] size = targetSize(context, 1280);
+                  int[] size = targetSize(context, options.maxSide);
                   projectionLoop(context, projection, size[0], size[1]);
                 } catch (Exception e) {
                   if (!stop) sink.error(e);
@@ -109,6 +112,19 @@ public final class ScreenCapture {
             },
             "screen-capture-projection");
     thread.start();
+  }
+
+  /** Request an IDR after sender backpressure; root screenrecord has no direct control API. */
+  public void requestSyncFrame() {
+    MediaCodec current = encoder;
+    if (Build.VERSION.SDK_INT < 19 || current == null || stop) return;
+    try {
+      android.os.Bundle params = new android.os.Bundle();
+      params.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+      current.setParameters(params);
+    } catch (Exception e) {
+      DebugLog.error("SCREEN_SYNC_REQUEST", e);
+    }
   }
 
   public void stop() {
@@ -174,9 +190,9 @@ public final class ScreenCapture {
         MediaCodec candidate = MediaCodec.createByCodecName(info.getName());
         MediaFormat f = MediaFormat.createVideoFormat("video/avc", w, h);
         f.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        f.setInteger(MediaFormat.KEY_BIT_RATE, 6000000);
-        f.setInteger(MediaFormat.KEY_FRAME_RATE, 24);
-        f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2);
+        f.setInteger(MediaFormat.KEY_BIT_RATE, options.bitrate);
+        f.setInteger(MediaFormat.KEY_FRAME_RATE, options.fps);
+        f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, options.keySeconds);
         candidate.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
         enc = candidate;
       } catch (Exception | OutOfMemoryError e) {
@@ -326,7 +342,7 @@ public final class ScreenCapture {
   private void runOneRecording(int w, int h) throws Exception {
     process =
         RootShell.startInteractive(
-            "screenrecord --output-format=h264 --size " + w + "x" + h + " --bit-rate 2000000 -");
+            "screenrecord --output-format=h264 --size " + w + "x" + h + " --bit-rate " + options.bitrate + " -");
     try {
       InputStream in = process.getInputStream();
       ByteArrayOutputStream pending = new ByteArrayOutputStream();

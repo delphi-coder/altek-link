@@ -539,18 +539,50 @@ public final class MainActivity extends Activity {
                 chat(p.id);
               }
             })
-        .setNeutralButton(
-            p.camera ? "Remove camera access" : "Allow camera access",
-            new DialogInterface.OnClickListener() {
-              public void onClick(DialogInterface d, int n) {
-                if (!p.approved) {
-                  toast("Unblock contact first");
-                  return;
-                }
-                db.camera(p.id, !p.camera);
-                toast("Camera access updated");
-              }
-            })
+        .setNeutralButton("Access permissions", new DialogInterface.OnClickListener() {
+          public void onClick(DialogInterface d, int n) {
+            if (!p.approved) { toast("Unblock contact first"); return; }
+            final int[] request = new int[] {0};
+            final AlertDialog access = new AlertDialog.Builder(MainActivity.this)
+                .setTitle("Access for " + p.name)
+                .setMultiChoiceItems(new String[] {"Camera access", "Unattended remote control (root required)"},
+                    new boolean[] {p.camera, p.remote}, new DialogInterface.OnMultiChoiceClickListener() {
+                      public void onClick(DialogInterface dialog, int which, boolean checked) {
+                        if (which == 0) { db.camera(p.id, checked); return; }
+                        final AlertDialog box = (AlertDialog) dialog;
+                        final int ticket = ++request[0];
+                        if (!checked) { db.remote(p.id, false); return; }
+                        // A tap alone never grants unattended access.
+                        box.getListView().setItemChecked(1, false);
+                        toast("Checking root access...");
+                        new Thread(new Runnable() {
+                          public void run() {
+                            final RootShell.Result result = RootShell.probeFresh();
+                            runOnUiThread(new Runnable() {
+                              public void run() {
+                                if (!box.isShowing() || request[0] != ticket) return;
+                                Store.Peer current = db.peer(p.id);
+                                if (result.granted && current != null && current.approved) {
+                                  db.remote(p.id, true);
+                                  box.getListView().setItemChecked(1, true);
+                                  toast("Root access ready");
+                                } else {
+                                  db.remote(p.id, false);
+                                  toast("Root access unavailable; remote calls will require an answer");
+                                }
+                              }
+                            });
+                          }
+                        }, "remote-root-check").start();
+                      }
+                    })
+                .setPositiveButton("Done", null).create();
+            access.setOnDismissListener(new DialogInterface.OnDismissListener() {
+              public void onDismiss(DialogInterface dialog) { request[0]++; }
+            });
+            access.show();
+          }
+        })
         .show();
   }
 
@@ -1024,6 +1056,66 @@ public final class MainActivity extends Activity {
     }
   }
 
+  private EditText screenOption(LinearLayout panel, String title, int value) {
+    panel.addView(label(title, 14));
+    EditText edit = new EditText(this);
+    edit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+    edit.setSingleLine(true);
+    edit.setText(Integer.toString(value));
+    panel.addView(edit);
+    return edit;
+  }
+
+  private void screenVideoSettings() {
+    if (LinkService.current != null && LinkService.current.call != null) {
+      toast("End the call before changing screen settings");
+      return;
+    }
+    ScreenOptions current = ScreenOptions.load(this);
+    LinearLayout panel = new LinearLayout(this);
+    panel.setOrientation(LinearLayout.VERTICAL);
+    panel.setPadding(dp(20), dp(4), dp(20), dp(4));
+    final EditText size = screenOption(panel, "Maximum long side (320?1920 px)", current.maxSide);
+    final EditText fps = screenOption(panel, "Encoder target FPS (1?60)", current.fps);
+    final EditText bitrate = screenOption(panel, "Bitrate (100?20000 kbps)", current.bitrate / 1000);
+    final EditText key = screenOption(panel, "Key-frame interval (1?10 seconds)", current.keySeconds);
+    panel.addView(label("Applies to the next screen share. Actual FPS depends on the device. "
+        + "Root screenrecord supports size and bitrate; its FPS and key-frame interval are system controlled.", 12));
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(panel);
+    final AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Screen share settings")
+        .setView(scroll).setPositiveButton("Save", null).setNegativeButton("Cancel", null)
+        .setNeutralButton("Defaults", null).create();
+    dialog.setOnShowListener(new DialogInterface.OnShowListener() {
+      public void onShow(DialogInterface ignored) {
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(new View.OnClickListener() {
+          public void onClick(View v) {
+            size.setText("1280"); fps.setText("24"); bitrate.setText("6000"); key.setText("2");
+          }
+        });
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(new View.OnClickListener() {
+          public void onClick(View v) {
+            try {
+              int max = Integer.parseInt(size.getText().toString());
+              int rate = Integer.parseInt(fps.getText().toString());
+              int kbps = Integer.parseInt(bitrate.getText().toString());
+              int seconds = Integer.parseInt(key.getText().toString());
+              if (!ScreenOptions.valid(max, rate, kbps, seconds)) throw new IllegalArgumentException();
+              ScreenOptions saved = new ScreenOptions();
+              saved.maxSide = max; saved.fps = rate; saved.bitrate = kbps * 1000; saved.keySeconds = seconds;
+              saved.save(MainActivity.this);
+              dialog.dismiss();
+              toast("Screen share settings saved");
+            } catch (Exception e) {
+              toast("Check the screen share setting ranges");
+            }
+          }
+        });
+      }
+    });
+    dialog.show();
+  }
+
   private void settings() {
     cancelVoice();
     screen = "settings";
@@ -1053,6 +1145,10 @@ public final class MainActivity extends Activity {
                 });
           }
         });
+    LinearLayout screenRow = row(panel);
+    button(screenRow, "Screen share settings", new View.OnClickListener() {
+      public void onClick(View v) { screenVideoSettings(); }
+    });
     final SharedPreferences prefs = getSharedPreferences("settings", 0);
     final AvatarView ownAvatar = new AvatarView(this);
     ownAvatar.bind("self", prefs.getString("name", Build.MODEL));
@@ -1179,7 +1275,7 @@ public final class MainActivity extends Activity {
                 + "\n\n"
                 + "Receiver stays active with a notification after leaving the app. Force Stop"
                 + " disables it until reopened. Camera mode must remain on its screen.\n\n"
-                + "Version 0.1.16 · Android 4.1+\n"
+                + "Version 0.1.17 · Android 4.1+\n"
                 + "The 10 built-in emoji use Twemoji artwork (Twitter / contributors), CC-BY 4.0."
                 + " github.com/jdecked/twemoji. Other keyboard emoji use device fonts.",
             13));

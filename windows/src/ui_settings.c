@@ -363,17 +363,24 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         c = ui_control(h, L"BUTTON", L"Minimize before sharing this desktop",
                        BS_AUTOCHECKBOX | WS_TABSTOP, 16, 20, 451, 360, 27);
         SendMessageW(c, BM_SETCHECK, app.minimize_screen_share ? BST_CHECKED : BST_UNCHECKED, 0);
+        label(h, L"Remote pinch zoom", 491);
+        c = ui_control(h, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP,
+                       18, 195, 488, 270, 120);
+        SendMessageW(c, CB_ADDSTRING, 0, (LPARAM)L"Enabled everywhere");
+        SendMessageW(c, CB_ADDSTRING, 0, (LPARAM)L"Disabled on desktop");
+        SendMessageW(c, CB_ADDSTRING, 0, (LPARAM)L"Disabled everywhere");
+        SendMessageW(c, CB_SETCURSEL, app.remote_pinch_mode, 0);
         ui_control(h, L"STATIC",
                    L"Calls use the default Windows microphone and speaker.\nUse a headset to avoid "
                    L"echo. Video changes apply to the next call.",
-                   0, 0, 20, 486, 455, 42);
+                   0, 0, 20, 530, 455, 42);
         _snprintf(version, sizeof(version) - 1, "Version %s", APP_VERSION_BUILD);
         version[sizeof(version) - 1] = 0;
         wide(version, w, countof(w));
-        ui_control(h, L"STATIC", w, SS_CENTER, 0, 195, 538, 270, 22);
-        ui_control(h, L"BUTTON", L"Open data folder", BS_PUSHBUTTON, 13, 20, 564, 160, 34);
-        ui_control(h, L"BUTTON", L"Open settings.ini", BS_PUSHBUTTON, 17, 190, 564, 145, 34);
-        ui_control(h, L"BUTTON", L"Save", BS_DEFPUSHBUTTON, 14, 345, 564, 120, 34);
+        ui_control(h, L"STATIC", w, SS_CENTER, 0, 195, 582, 270, 22);
+        ui_control(h, L"BUTTON", L"Open data folder", BS_PUSHBUTTON, 13, 20, 608, 160, 34);
+        ui_control(h, L"BUTTON", L"Open settings.ini", BS_PUSHBUTTON, 17, 190, 608, 145, 34);
+        ui_control(h, L"BUTTON", L"Save", BS_DEFPUSHBUTTON, 14, 345, 608, 120, 34);
         return 0;
     }
     if (msg == WM_COMMAND)
@@ -436,6 +443,11 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
             app.bitrate = bitrate * 1000;
             app.minimize_screen_share =
                 SendDlgItemMessageW(h, 16, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            index = SendDlgItemMessageW(h, 18, CB_GETCURSEL, 0, 0);
+            if (index >= 0 && index <= 2)
+            {
+                app.remote_pinch_mode = (int)index;
+            }
             index = SendDlgItemMessageW(h, 15, CB_GETCURSEL, 0, 0);
             if (index >= 0 && index < 2)
             {
@@ -504,5 +516,5 @@ void ui_settings(HWND parent)
     settings_window =
         CreateWindowExW(WS_EX_DLGMODALFRAME, wc.lpszClassName, L"ALTEK Link - Settings",
                         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, CW_USEDEFAULT,
-                        CW_USEDEFAULT, 500, 650, parent, NULL, app.instance, NULL);
+                        CW_USEDEFAULT, 500, 694, parent, NULL, app.instance, NULL);
 }

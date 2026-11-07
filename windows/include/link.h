@@ -111,7 +111,7 @@ struct app
     WCHAR dir[MAX_PATH], exe_dir[MAX_PATH];
     char name[256], id[65], avatar[65];
     int camera_index, width, height, fps, bitrate, rx_rotate, theme;
-    int minimize_screen_share;
+    int minimize_screen_share, remote_pinch_mode;
     int screen_width, screen_height, screen_fps, screen_bitrate;
     int screen_quality, screen_iframe, screen_threads, screen_frame_skip;
     struct peer peers[MAX_PEERS];
@@ -189,6 +189,8 @@ int screen_send_mouse(int op, float x, float y);
 int screen_send_wheel(float x, float y, int delta, int horiz);
 
 int screen_send_keycode(int vk, int down);
+int screen_remote_text_supported(void);
+int screen_send_text(const WCHAR *text, int length);
 int media_packet(struct call *c, const void *data, int len);
 void video_present(const unsigned char *rgb, int w, int h, int preview);
 LPCWSTR screen_cursor_resource(int id);

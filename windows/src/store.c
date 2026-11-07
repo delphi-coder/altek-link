@@ -35,6 +35,7 @@ void settings_save(void)
     ini_int(L"rx_rotate", app.rx_rotate, p);
     ini_int(L"theme", app.theme, p);
     ini_int(L"minimize_screen_share", app.minimize_screen_share, p);
+    ini_int(L"remote_pinch_mode", app.remote_pinch_mode, p);
     LeaveCriticalSection(&app.lock);
 }
 void peers_save(void)
@@ -286,6 +287,11 @@ void store_init(void)
     app.theme = GetPrivateProfileIntW(L"settings", L"theme", 0, p);
     app.minimize_screen_share =
         GetPrivateProfileIntW(L"settings", L"minimize_screen_share", 1, p) ? 1 : 0;
+    app.remote_pinch_mode = GetPrivateProfileIntW(L"settings", L"remote_pinch_mode", 0, p);
+    if (app.remote_pinch_mode < 0 || app.remote_pinch_mode > 2)
+    {
+        app.remote_pinch_mode = 0;
+    }
     if (app.theme < 0 || app.theme > 1)
     {
         app.theme = 0;
