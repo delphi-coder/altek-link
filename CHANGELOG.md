@@ -4,6 +4,8 @@ User-facing updates for ALTEK Link. Earlier Windows-only notes are available in 
 
 ## Android 0.1.17 and Windows 0.1.7 build 18 (2026-11-07)
 
+Android and Windows downloads are available together in the same release.
+
 ### Video calls
 
 - **See yourself during a call.** A movable self-view shows which camera is active and what it sees. Double-tap the small video to swap it with the main view; tap the screen to hide or show it.
