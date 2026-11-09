@@ -2,6 +2,16 @@
 
 User-facing updates for ALTEK Link. Earlier Windows-only notes are available in [windows/docs/CHANGES.md](windows/docs/CHANGES.md).
 
+## Android 0.2.0 build 3 and Windows 0.2.0 build 2 (2026-11-09)
+
+- Share copied text between devices during remote control. Choose controller to remote, remote to controller, both directions, or turn sharing off.
+- Keep the copied text on the device after the remote session ends. On Android 10 and later, return to ALTEK Link when needed to let it read and send text copied in another app.
+- See the remote Android screen sooner: the Android viewer now preserves the initial video frames while its display prepares.
+- Find the installed Android build number in Settings.
+- Windows screen sharing now defaults to 8 frames per second for new configurations.
+- Find clear explanations in newly created Windows settings files. Existing settings and comments are kept.
+- Avoid unnecessary changes to the Windows settings file when its values have not changed.
+
 ## Android 0.1.17 and Windows 0.1.7 build 18 (2026-11-07)
 
 Android and Windows downloads are available together in the same release.

@@ -34,9 +34,12 @@
 #define ID_VIEW 123
 
 #define ID_FULLSCREEN 124
+#define ID_CLIPBOARD 125
+#define UI_CLIPBOARD_PACKET (WM_APP + 7)
 #define UI_FULLSCREEN_KEY (WM_APP + 5)
 #define UI_FULLSCREEN_TEXT (WM_APP + 6)
 int ui_screen_text_key(int vk);
+void ui_clipboard_packet(const unsigned char *data, int len);
 struct theme
 {
     COLORREF bar, bar_line, frame_line, chat_bg, mine_bg, select_bg;

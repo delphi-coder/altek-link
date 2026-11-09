@@ -47,7 +47,7 @@
 #error Wrong compiler environment: x86 was requested.
 #endif
 #include "build_number.h"
-#define APP_VERSION "0.1.7"
+#define APP_VERSION "0.2.0"
 #define ALTEK_TEXT_INNER(value) #value
 #define ALTEK_TEXT(value) ALTEK_TEXT_INNER(value)
 #define APP_VERSION_BUILD APP_VERSION " (build " ALTEK_TEXT(APP_BUILD) ")"
@@ -189,6 +189,8 @@ int screen_send_mouse(int op, float x, float y);
 int screen_send_wheel(float x, float y, int delta, int horiz);
 
 int screen_send_keycode(int vk, int down);
+int screen_send_clipboard(const unsigned char *packet, int len);
+void ui_clipboard_packet(const unsigned char *data, int len);
 int screen_remote_text_supported(void);
 int screen_send_text(const WCHAR *text, int length);
 int media_packet(struct call *c, const void *data, int len);

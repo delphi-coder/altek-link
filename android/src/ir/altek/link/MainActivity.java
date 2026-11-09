@@ -1275,10 +1275,18 @@ public final class MainActivity extends Activity {
                 + "\n\n"
                 + "Receiver stays active with a notification after leaving the app. Force Stop"
                 + " disables it until reopened. Camera mode must remain on its screen.\n\n"
-                + "Version 0.1.17 · Android 4.1+\n"
+                + "Version " + appVersion() + " · Android 4.1+\n"
                 + "The 10 built-in emoji use Twemoji artwork (Twitter / contributors), CC-BY 4.0."
                 + " github.com/jdecked/twemoji. Other keyboard emoji use device fonts.",
             13));
+  }
+
+  private String appVersion() {
+    try {
+      return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+    } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+      return "unknown";
+    }
   }
 
   private String addresses() {

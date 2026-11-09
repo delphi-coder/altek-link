@@ -6,9 +6,65 @@ static void ini_path(WCHAR *p)
 }
 static void ini_int(const WCHAR *key, int v, const WCHAR *p)
 {
-    WCHAR s[40];
+    WCHAR s[40], current[256];
     _snwprintf(s, 40, L"%d", v);
-    WritePrivateProfileStringW(L"settings", key, s, p);
+    GetPrivateProfileStringW(L"settings", key, L"{missing}", current, countof(current), p);
+    if (lstrcmpW(current, s))
+    {
+        WritePrivateProfileStringW(L"settings", key, s, p);
+    }
+}
+static void ini_string(const WCHAR *key, const WCHAR *value, const WCHAR *p)
+{
+    WCHAR current[256];
+    GetPrivateProfileStringW(L"settings", key, L"{missing}", current, countof(current), p);
+    if (lstrcmpW(current, value))
+    {
+        WritePrivateProfileStringW(L"settings", key, value, p);
+    }
+}
+
+/* Only create a reference file for a new installation; never replace an existing INI. */
+static int ini_create(const WCHAR *p)
+{
+    static const char content[] =
+        "; ALTEK Link settings. Restart the application after changing screen_* values.\r\n"
+        "; An existing [identity] container belongs to this machine; do not copy it.\r\n"
+        "\r\n[settings]\r\n"
+        "; Device name visible to other devices.\r\nname=\r\n"
+        "; Avatar identifier; managed by the application.\r\navatar=\r\n"
+        "\r\n; Camera index, output dimensions, frame rate and bitrate (bits per second).\r\n"
+        "camera=0\r\nwidth=320\r\nheight=240\r\nfps=15\r\nbitrate=4000000\r\n"
+        "; Received camera video rotation: 0, 90, 180 or 270 degrees.\r\nrx_rotate=90\r\n"
+        "; Color theme: 0=green, 1=petrol blue.\r\ntheme=0\r\n"
+        "\r\n; Screen output dimensions: 0/0 uses the native desktop size.\r\n"
+        "; Otherwise both dimensions must be even and at least 16.\r\n"
+        "screen_width=0\r\nscreen_height=0\r\n"
+        "; Screen frames per second: 1..60.\r\nscreen_fps=8\r\n"
+        "; Screen bitrate in bits per second: 50000..20000000.\r\nscreen_bitrate=4000000\r\n"
+        "; Rate control: 1=quality, 0=bitrate.\r\nscreen_quality=1\r\n"
+        "; Keyframe interval in frames: 1..3600 (8 at 8 fps is about one second).\r\n"
+        "screen_iframe=8\r\n"
+        "; Encoder threads: 0=automatic, 1=single-threaded, 2..16=thread count.\r\n"
+        "screen_threads=1\r\n"
+        "; Allow the encoder to skip frames: 1=yes, 0=no.\r\nscreen_frame_skip=1\r\n"
+        "\r\n; Minimize the app before sharing this desktop: 1=yes, 0=no.\r\n"
+        "minimize_screen_share=1\r\n"
+        "; Remote pinch zoom: 0=enabled, 1=disabled on desktop, 2=disabled everywhere.\r\n"
+        "remote_pinch_mode=0\r\n";
+    HANDLE f;
+    DWORD written;
+    BOOL ok;
+    f = CreateFileW(p, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    ok = WriteFile(f, content, (DWORD)(sizeof(content) - 1), &written, NULL);
+    CloseHandle(f);
+    if (!ok || written != sizeof(content) - 1)
+    {
+        DeleteFileW(p);
+        return 0;
+    }
+    return 1;
 }
 void settings_save(void)
 {
@@ -16,9 +72,9 @@ void settings_save(void)
     EnterCriticalSection(&app.lock);
     ini_path(p);
     wide(app.name, s, 256);
-    WritePrivateProfileStringW(L"settings", L"name", s, p);
+    ini_string(L"name", s, p);
     wide(app.avatar, s, 256);
-    WritePrivateProfileStringW(L"settings", L"avatar", s, p);
+    ini_string(L"avatar", s, p);
     ini_int(L"camera", app.camera_index, p);
     ini_int(L"width", app.width, p);
     ini_int(L"height", app.height, p);
@@ -260,6 +316,7 @@ void store_init(void)
     CreateDirectoryW(p, NULL);
     ini_path(p);
     GetComputerNameW(host, &hn);
+    if (ini_create(p)) ini_string(L"name", host, p);
     GetPrivateProfileStringW(L"settings", L"name", host, w, 256, p);
     utf8(w, app.name, 256);
     GetPrivateProfileStringW(L"settings", L"avatar", L"", w, 256, p);
@@ -275,7 +332,7 @@ void store_init(void)
     app.bitrate = GetPrivateProfileIntW(L"settings", L"bitrate", 4000000, p);
     app.screen_width = GetPrivateProfileIntW(L"settings", L"screen_width", 0, p);
     app.screen_height = GetPrivateProfileIntW(L"settings", L"screen_height", 0, p);
-    app.screen_fps = GetPrivateProfileIntW(L"settings", L"screen_fps", 4, p);
+    app.screen_fps = GetPrivateProfileIntW(L"settings", L"screen_fps", 8, p);
     app.screen_bitrate = GetPrivateProfileIntW(L"settings", L"screen_bitrate", 4000000, p);
     app.screen_quality = GetPrivateProfileIntW(L"settings", L"screen_quality", 1, p);
     app.screen_iframe =
@@ -320,7 +377,7 @@ void store_init(void)
     }
     if (app.screen_fps < 1 || app.screen_fps > 60)
     {
-        app.screen_fps = 4;
+        app.screen_fps = 8;
     }
     if (app.screen_bitrate < 50000 || app.screen_bitrate > 20000000)
     {

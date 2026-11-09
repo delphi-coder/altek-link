@@ -18,6 +18,77 @@ static int view_mode = 0;
 static int scr_x = 0, scr_y = 0;
 static int controls_incoming = -1, controls_nav = -1, controls_fullscreen = -1;
 static LONG remote_cursor = 1;
+static int clipboard_mode;
+static DWORD clipboard_suppress;
+
+void ui_clipboard_packet(const unsigned char *data, int len)
+{
+    unsigned char *copy;
+    if (len < 2 || len > 65538 || !ui_call) return;
+    copy = (unsigned char *)malloc(len);
+    if (!copy) return;
+    memcpy(copy, data, len);
+    if (!PostMessageW(ui_call, UI_CLIPBOARD_PACKET, (WPARAM)len, (LPARAM)copy)) free(copy);
+}
+
+static int clipboard_controller(void)
+{
+    return app.call && app.call->outgoing && !strcmp(app.call->kind, "screen");
+}
+
+static void clipboard_send(HWND hwnd)
+{
+    HANDLE h;
+    const WCHAR *w;
+    unsigned char *packet;
+    int chars, bytes;
+    if (!(clipboard_mode & (clipboard_controller() ? 1 : 2))) return;
+    if (GetClipboardSequenceNumber() == clipboard_suppress) return;
+    if (!OpenClipboard(hwnd)) return;
+    h = GetClipboardData(CF_UNICODETEXT);
+    w = h ? (const WCHAR *)GlobalLock(h) : NULL;
+    if (w)
+    {
+        chars = (int)wcslen(w);
+        bytes = WideCharToMultiByte(CP_UTF8, 0, w, chars, NULL, 0, NULL, NULL);
+        if (bytes >= 0 && bytes <= 65536)
+        {
+            packet = (unsigned char *)malloc(bytes + 2);
+            if (packet)
+            {
+                packet[0] = 3; packet[1] = 18;
+                if (!bytes || WideCharToMultiByte(CP_UTF8, 0, w, chars, (char *)packet + 2, bytes, NULL, NULL))
+                    screen_send_clipboard(packet, bytes + 2);
+                free(packet);
+            }
+        }
+        GlobalUnlock(h);
+    }
+    CloseClipboard();
+}
+
+static void clipboard_receive(HWND hwnd, const unsigned char *packet, int len)
+{
+    int count;
+    HGLOBAL mem;
+    WCHAR *w;
+    if (!(clipboard_mode & (clipboard_controller() ? 2 : 1)) || len < 2 || len > 65538) return;
+    count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (const char *)packet + 2, len - 2, NULL, 0);
+    if (!count && len > 2) return;
+    mem = GlobalAlloc(GMEM_MOVEABLE, (count + 1) * sizeof(WCHAR));
+    if (!mem) return;
+    w = (WCHAR *)GlobalLock(mem);
+    if (!w) { GlobalFree(mem); return; }
+    if (count) MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (const char *)packet + 2, len - 2, w, count);
+    w[count] = 0;
+    GlobalUnlock(mem);
+    if (!OpenClipboard(hwnd)) { GlobalFree(mem); return; }
+    EmptyClipboard();
+    if (!SetClipboardData(CF_UNICODETEXT, mem)) GlobalFree(mem);
+    clipboard_suppress = GetClipboardSequenceNumber();
+    CloseClipboard();
+}
+
 
 void ui_remote_cursor(int id)
 {
@@ -298,6 +369,9 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         ui_control(hwnd, L"BUTTON", L"", BS_OWNERDRAW, ID_RECENTS, 0, 0, 48, 42);
         ui_control(hwnd, L"BUTTON", L"", BS_OWNERDRAW, ID_VIEW, 0, 0, 48, 42);
         ui_control(hwnd, L"BUTTON", L"", BS_OWNERDRAW, ID_FULLSCREEN, 0, 0, 48, 42);
+        ui_control(hwnd, L"BUTTON", L"Clipboard", BS_PUSHBUTTON, ID_CLIPBOARD, 0, 0, 75, 28);
+        AddClipboardFormatListener(hwnd);
+        clipboard_mode = 0;
         SetTimer(hwnd, 1, 100, NULL);
         return 0;
     }
@@ -311,6 +385,24 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         {
             MoveWindow(GetDlgItem(hwnd, ids[i]), x + i * 58, HIWORD(lp) - 56, 48, 42, TRUE);
         }
+        MoveWindow(GetDlgItem(hwnd, ID_CLIPBOARD), LOWORD(lp) - 95, 5, 85, 28, TRUE);
+        return 0;
+    }
+    if (msg == WM_CLIPBOARDUPDATE) { clipboard_send(hwnd); return 0; }
+    if (msg == UI_CLIPBOARD_PACKET)
+    {
+        unsigned char *packet = (unsigned char *)lp;
+        int len = (int)wp;
+        if (len == 3 && packet[1] == 17 && !clipboard_controller())
+        {
+            clipboard_mode = packet[2] & 3;
+            /* For two-way startup, the controller sends its current clipboard first.
+               Do not race it with the remote device's older clipboard contents. */
+            if (clipboard_mode == 3) clipboard_suppress = GetClipboardSequenceNumber();
+            else clipboard_send(hwnd);
+        }
+        else if (len >= 2 && packet[1] == 18) clipboard_receive(hwnd, packet, len);
+        free(packet);
         return 0;
     }
     if (msg == UI_REMOTE_CURSOR)
@@ -406,6 +498,7 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             ScreenToClient(hwnd, &pt);
             ui_screen_fullscreen_pointer(hwnd, pt.x, pt.y);
         }
+        ShowWindow(GetDlgItem(hwnd, ID_CLIPBOARD), nav && !ui_screen_fullscreen_active(hwnd) ? SW_SHOW : SW_HIDE);
         call_controls(hwnd, incoming, nav);
         if (!IsIconic(hwnd))
         {
@@ -428,6 +521,28 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     {
         switch (LOWORD(wp))
         {
+        case ID_CLIPBOARD:
+            if (clipboard_controller())
+            {
+                HMENU menu = CreatePopupMenu();
+                POINT pt;
+                UINT chosen;
+                unsigned char packet[3];
+                const WCHAR *labels[4] = {L"Disabled", L"Controller to remote", L"Remote to controller", L"Both directions"};
+                int k;
+                for (k = 0; k < 4; k++) AppendMenuW(menu, MF_STRING | (clipboard_mode == k ? MF_CHECKED : 0), k + 1, labels[k]);
+                GetCursorPos(&pt);
+                chosen = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, pt.x, pt.y, 0, hwnd, NULL);
+                DestroyMenu(menu);
+                if (chosen)
+                {
+                    clipboard_mode = chosen - 1;
+                    packet[0] = 3; packet[1] = 17; packet[2] = (unsigned char)clipboard_mode;
+                    screen_send_clipboard(packet, 3);
+                    clipboard_send(hwnd);
+                }
+            }
+            break;
         case ID_ANSWER:
         {
             int minimize = 0;
@@ -755,6 +870,8 @@ static LRESULT CALLBACK call_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         InterlockedExchange(&remote_cursor, 1);
         ui_screen_fullscreen_destroy(hwnd);
         KillTimer(hwnd, 1);
+        RemoveClipboardFormatListener(hwnd);
+        clipboard_mode = 0;
         ui_call = NULL;
         controls_incoming = controls_nav = controls_fullscreen = -1;
         return 0;

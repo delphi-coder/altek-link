@@ -11,7 +11,7 @@ if defined ALTEK_SDK set "SDK=%ALTEK_SDK%"
 set "BT=%SDK%\build-tools\33.0.1"
 set "PLATFORM=%SDK%\platforms\android-34\android.jar"
 set "MODE_SOURCE=modes\%MODE%\ir\altek\link\DebugLog.java"
-set "OUTPUT=bin\ALTEK-Link-0.1.17-%MODE%.apk"
+set "OUTPUT=bin\ALTEK-Link-0.2.0-build3-%MODE%.apk"
 set "JAVAC_DEBUG=-g:none"
 set "D8_MODE=--release"
 
@@ -101,7 +101,7 @@ if not exist ".local" mkdir ".local"
 >".local\last-build" echo %MODE%
 echo.
 echo SUCCESS: %CD%\%OUTPUT%
-echo ALTEK Link 0.1.17 %MODE% build completed.
+echo ALTEK Link 0.2.0 %MODE% build completed.
 exit /b 0
 
 :clean

@@ -30,6 +30,7 @@ public final class LinkService extends Service {
   // letting someone else drive the phone while its owner keeps using it is that leaving the app
   // must not end the session. Populated only on the side that is sharing its screen.
   public volatile ScreenEngine screenEngine;
+  public ScreenClipboard screenClipboard;
   public volatile ScreenCapture screenCapture;
   public volatile RemoteControl screenRemote;
   public volatile String screenStatus = "";
@@ -189,7 +190,7 @@ public final class LinkService extends Service {
       }
       if (!live) return;
       DebugLog.init(this, identity.id);
-      DebugLog.event("SERVICE", "Starting API=" + Build.VERSION.SDK_INT + " version=0.1.17");
+      DebugLog.event("SERVICE", "Starting API=" + Build.VERSION.SDK_INT + " version=0.2.0");
       server = (SSLServerSocket) identity.tls.getServerSocketFactory().createServerSocket();
       server.setReuseAddress(true);
       server.bind(new InetSocketAddress(Wire.PORT));
@@ -1009,6 +1010,8 @@ public final class LinkService extends Service {
               }
             });
     final ScreenEngine e = screenEngine;
+    screenClipboard = new ScreenClipboard(this, e, false);
+    e.attachClipboard(screenClipboard);
     if (Build.VERSION.SDK_INT >= 21 && ControlAccessibilityService.enabled()) e.sendTextCapability();
     ScreenCapture.Sink sink =
         new ScreenCapture.Sink() {
@@ -1066,6 +1069,7 @@ public final class LinkService extends Service {
   }
 
   private void endScreenShare() {
+    if (screenClipboard != null) { screenClipboard.close(); screenClipboard = null; }
     if (screenEngine != null) {
       screenEngine.stop();
       screenEngine = null;

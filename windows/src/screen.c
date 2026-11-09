@@ -808,6 +808,17 @@ static int screen_send(const unsigned char *pkt, int len)
     LeaveCriticalSection(&app.lock);
     return ok;
 }
+int screen_send_clipboard(const unsigned char *packet, int len)
+{
+    struct call *c;
+    int ok = 0;
+    EnterCriticalSection(&app.lock);
+    c = app.call;
+    if (c && !strcmp(c->kind, "screen") && c->tls && !c->stop)
+        ok = media_packet(c, packet, len);
+    LeaveCriticalSection(&app.lock);
+    return ok;
+}
 int screen_send_tap(float x, float y)
 {
     unsigned char p[10];
@@ -953,6 +964,8 @@ void screen_run(struct call *c)
             }
             break;
         case 3: /* control */
+            if (len >= 2 && (b[1] == 17 || b[1] == 18))
+                ui_clipboard_packet(b, len);
             if (c->outgoing && len == 3 && b[1] == 16 && b[2] == 1)
                 InterlockedExchange(&remote_text_capable, 1);
             if (c->outgoing && len == 3 && b[1] == 14 && b[2] <= 14)

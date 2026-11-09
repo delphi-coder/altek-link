@@ -35,18 +35,16 @@ public final class RemoteControlActivity extends Activity implements TextureView
 
   // Viewer (controller) side only.
   private ScreenEngine engine;
-  // Written on the UI thread (inside format()'s runOnUiThread), but read on ScreenEngine's own
-  // reader thread (inside frame(), which is NOT posted to the UI thread - matches how MediaEngine
-  // already calls VideoDisplay.frame() directly from its own reader thread elsewhere in this app).
-  // Without volatile, the reader thread is not guaranteed to promptly see - or ever see - a write
-  // made on the UI thread; this is a plain Java Memory Model visibility issue, not Android-specific,
-  // and fits the reported symptom exactly: works, then randomly doesn't, with no code path change.
+  private ScreenClipboard clipboard;
+  private int clipboardMode;
+  // Format, surface and frame handoff are coordinated across the reader and UI threads.
+  private final Object screenLock = new Object();
+  private final ScreenStartupFrames startupFrames = new ScreenStartupFrames();
   private volatile VideoDisplay display;
   private volatile boolean h264Mode;
-  private boolean surfaceReady;
+  private boolean surfaceReady, haveFormat, decoderReady;
   private android.graphics.SurfaceTexture surfaceTex;
-  private boolean pendingFormat;
-  private int pendingW, pendingH;
+  private int pendingW, pendingH, formatGeneration;
   private byte[] pendingConfig;
   private int lastW = 0, lastH = 0; // Last decoded frame size for re-layout on rotation
   private boolean fitMode = true; // true=fit (contain, letterbox), false=fill (cover, crop)
@@ -260,6 +258,23 @@ public final class RemoteControlActivity extends Activity implements TextureView
             finish();
           }
         });
+    Button clip = new Button(this);
+    clip.setText("Clip");
+    clip.setContentDescription("Clipboard sharing");
+    clip.setOnClickListener(new View.OnClickListener() { public void onClick(View v) {
+      if (engine == null) return;
+      final String[] labels = {"Disabled", "Controller to remote", "Remote to controller", "Both directions"};
+      new android.app.AlertDialog.Builder(RemoteControlActivity.this).setTitle("Clipboard sharing")
+          .setSingleChoiceItems(labels, clipboardMode, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int which) {
+              clipboardMode = which;
+              engine.sendClipboardMode(which);
+              clipboard.setMode(which);
+              dialog.dismiss();
+            }
+          }).show();
+    }});
+    buttons.addView(clip);
     buttons.addView(backBtn);
     buttons.addView(homeBtn);
     buttons.addView(recentsBtn);
@@ -351,6 +366,13 @@ public final class RemoteControlActivity extends Activity implements TextureView
     return b;
   }
 
+  public void onWindowFocusChanged(boolean hasFocus) {
+    super.onWindowFocusChanged(hasFocus);
+    if (clipboard != null) clipboard.focus(hasFocus);
+    LinkService service = LinkService.current;
+    if (service != null && service.screenClipboard != null) service.screenClipboard.focus(hasFocus);
+  }
+
   protected void onResume() {
     super.onResume();
     active = true;
@@ -382,14 +404,20 @@ public final class RemoteControlActivity extends Activity implements TextureView
 
   /** Viewer-side cleanup only; the sharing side has nothing local to tear down any more. */
   private void teardown() {
+    if (clipboard != null) { clipboard.close(); clipboard = null; }
     remoteTap.reset();
     if (engine != null) {
       engine.stop();
       engine = null;
     }
-    if (display != null) {
-      display.stop();
-      display = null;
+    synchronized (screenLock) {
+      decoderReady = false;
+      haveFormat = false;
+      startupFrames.clear();
+      if (display != null) {
+        display.stop();
+        display = null;
+      }
     }
   }
 
@@ -442,26 +470,28 @@ public final class RemoteControlActivity extends Activity implements TextureView
   }
 
   public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture texture, int w, int h) {
-    output = new Surface(texture);
-    surfaceReady = true;
-    surfaceTex = texture;
-    DebugLog.event("SURFACE_AVAIL", "w=" + w + " h=" + h + " pending=" + pendingFormat + " disp=" + (display != null));
-    if (pendingFormat) {
-      try {
-        texture.setDefaultBufferSize(pendingW, pendingH);
-      } catch (Throwable t) {
-      }
-      if (display == null) {
-        display =
-            new VideoDisplay(
-                output,
-                new VideoDisplay.Listener() {
-                  public void size(int w, int h) {}
-                });
-      }
-      display.format(pendingW, pendingH, pendingConfig);
-      pendingFormat = false;
+    synchronized (screenLock) {
+      output = new Surface(texture);
+      surfaceReady = true;
+      surfaceTex = texture;
+      configureScreenDecoder();
     }
+  }
+
+  // Called on the UI thread with screenLock held. Queue format before any saved frames.
+  private void configureScreenDecoder() {
+    if (!haveFormat || !h264Mode || !surfaceReady || output == null || decoderReady) return;
+    try { surfaceTex.setDefaultBufferSize(pendingW, pendingH); } catch (Throwable ignored) {}
+    if (display == null) {
+      display = new VideoDisplay(output, new VideoDisplay.Listener() {
+        public void size(int w, int h) {}
+      });
+    }
+    display.format(pendingW, pendingH, pendingConfig);
+    ScreenStartupFrames.Frame frame;
+    while ((frame = startupFrames.take()) != null)
+      display.frame(frame.pts, frame.key ? 1 : 0, frame.bytes);
+    decoderReady = true;
   }
 
   public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture texture, int w, int h) {
@@ -485,14 +515,19 @@ public final class RemoteControlActivity extends Activity implements TextureView
   public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture texture) {}
 
   public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture texture) {
-    surfaceReady = false;
-    if (display != null) {
-      display.stop();
-      display = null;
-    }
-    if (output != null) {
-      output.release();
-      output = null;
+    synchronized (screenLock) {
+      surfaceReady = false;
+      surfaceTex = null;
+      decoderReady = false;
+      startupFrames.clear();
+      if (display != null) {
+        display.stop();
+        display = null;
+      }
+      if (output != null) {
+        output.release();
+        output = null;
+      }
     }
     return true;
   }
@@ -904,6 +939,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
               beginSharing(s, c);
             }
             if (s.screenEngine != null) {
+              if (s.screenClipboard != null) s.screenClipboard.focus(hasWindowFocus());
               info.setText(s.screenStatus.length() > 0 ? s.screenStatus : "Remote control active");
               RemoteControl r = s.screenRemote;
               if (Build.VERSION.SDK_INT >= 24 && r != null && !r.rootFree()) {
@@ -939,60 +975,52 @@ public final class RemoteControlActivity extends Activity implements TextureView
             c.socket,
             new ScreenEngine.FrameListener() {
               public void format(final boolean h264, final int w, final int h, final byte[] config) {
-                runOnUiThread(
-                    new Runnable() {
-                      public void run() {
-                        if (!active) return;
-                        h264Mode = h264;
-                        surface.setVisibility(h264 ? View.VISIBLE : View.GONE);
-                        image.setVisibility(h264 ? View.GONE : View.VISIBLE);
-                        fitWithMode(h264 ? (View) surface : (View) image, w, h);
-                        lastW = w;
-                        lastH = h;
-                        if (h264) {
-                          DebugLog.event("SCREEN_AGENT", "fmt h264 w=" + w + " h=" + h + " surf=" + surfaceReady + " out=" + (output != null) + " disp=" + (display != null));
-                          if (surfaceReady && output != null) {
-                            if (surfaceTex != null && w > 0 && h > 0) {
-                              try {
-                                surfaceTex.setDefaultBufferSize(w, h);
-                              } catch (Throwable t) {
-                              }
-                            }
-                            if (display == null)
-                              display =
-                                  new VideoDisplay(
-                                      output,
-                                      new VideoDisplay.Listener() {
-                                        public void size(int w, int h) {}
-                                      });
-                            display.format(w, h, config);
-                          } else {
-                            pendingFormat = true;
-                            pendingW = w;
-                            pendingH = h;
-                            pendingConfig = config;
-                          }
-                        }
-                      }
-                    });
+                final int generation;
+                synchronized (screenLock) {
+                  if (haveFormat && h264Mode == h264 && pendingW == w && pendingH == h
+                      && java.util.Arrays.equals(pendingConfig, config)) return;
+                  haveFormat = true;
+                  h264Mode = h264;
+                  pendingW = w;
+                  pendingH = h;
+                  pendingConfig = config;
+                  decoderReady = false;
+                  startupFrames.clear();
+                  generation = ++formatGeneration;
+                }
+                runOnUiThread(new Runnable() {
+                  public void run() {
+                    if (!active) return;
+                    synchronized (screenLock) {
+                      if (generation != formatGeneration) return;
+                      surface.setVisibility(h264 ? View.VISIBLE : View.GONE);
+                      image.setVisibility(h264 ? View.GONE : View.VISIBLE);
+                      fitWithMode(h264 ? (View) surface : (View) image, w, h);
+                      lastW = w;
+                      lastH = h;
+                      if (h264) configureScreenDecoder();
+                    }
+                  }
+                });
               }
 
               public void frame(final boolean key, final long pts, final byte[] bytes) {
-                if (h264Mode && display != null) {
-                  display.frame(pts, key ? 1 : 0, bytes);
-                } else if (h264Mode) {
-                  if ((pts & 0xFFFFF) == 0) DebugLog.event("SCREEN_FRAME_DROP", "h264Mode but display=" + (display == null ? "null" : "not-null") + " surf=" + surfaceReady);
-                } else {
-                  final Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
-                  if (bmp == null) return;
-                  runOnUiThread(
-                      new Runnable() {
-                        public void run() {
-                          if (active) image.setImageBitmap(bmp);
-                          else bmp.recycle();
-                        }
-                      });
+                synchronized (screenLock) {
+                  if (!haveFormat) return;
+                  if (h264Mode) {
+                    if (decoderReady && display != null) display.frame(pts, key ? 1 : 0, bytes);
+                    else startupFrames.offer(key, pts, bytes);
+                    return;
+                  }
                 }
+                final Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bmp == null) return;
+                runOnUiThread(new Runnable() {
+                  public void run() {
+                    if (active) image.setImageBitmap(bmp);
+                    else bmp.recycle();
+                  }
+                });
               }
             },
             null,
@@ -1015,5 +1043,8 @@ public final class RemoteControlActivity extends Activity implements TextureView
                     });
               }
             });
+    clipboard = new ScreenClipboard(this, engine, true);
+    engine.attachClipboard(clipboard);
+    clipboard.focus(hasWindowFocus());
   }
 }

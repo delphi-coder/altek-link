@@ -65,6 +65,9 @@ public final class ScreenEngine {
   private final ControlListener control;
   private final Listener listener;
   private volatile boolean running = true;
+  private volatile ScreenClipboard clipboard;
+  private int pendingClipboardMode = -1;
+  private String pendingClipboardText;
   // Controls have priority, and either queue wakes the writer immediately.
   private final ScreenPacketQueue packets = new ScreenPacketQueue();
 
@@ -91,6 +94,34 @@ public final class ScreenEngine {
             },
             "screen-rx")
         .start();
+  }
+
+  public synchronized void attachClipboard(ScreenClipboard value) {
+    clipboard = value;
+    if (pendingClipboardMode >= 0) value.peerMode(pendingClipboardMode);
+    if (pendingClipboardText != null) value.receive(pendingClipboardText);
+    pendingClipboardMode = -1;
+    pendingClipboardText = null;
+  }
+  private synchronized void peerClipboardMode(int value) {
+    if (clipboard == null) pendingClipboardMode = value;
+    else clipboard.peerMode(value);
+  }
+  private synchronized void peerClipboardText(String text) {
+    if (clipboard == null) pendingClipboardText = text;
+    else clipboard.receive(text);
+  }
+  public void sendClipboardMode(int mode) { enqueueControl(new byte[] {3, 17, (byte) mode}); }
+  public boolean sendClipboard(String text) {
+    try {
+      byte[] bytes = text.getBytes("UTF-8");
+      if (bytes.length > 65536) return false;
+      byte[] packet = new byte[bytes.length + 2];
+      packet[0] = 3; packet[1] = 18;
+      System.arraycopy(bytes, 0, packet, 2, bytes.length);
+      enqueueControl(packet);
+      return true;
+    } catch (Exception e) { return false; }
   }
 
   public void sendTextCapability() {
@@ -265,7 +296,11 @@ public final class ScreenEngine {
           if (frames != null) frames.frame(key, pts, bytes);
         } else if (kind == KIND_CONTROL) {
           int op = packet.readUnsignedByte();
-          if (op == 1) {
+          if (op == 17 && b.length == 3) {
+            peerClipboardMode(b[2]);
+          } else if (op == 18 && b.length <= 65538) {
+            peerClipboardText(new String(b, 2, b.length - 2, "UTF-8"));
+          } else if (op == 1) {
             float x = packet.readFloat(), y = packet.readFloat();
             if (control != null) control.tap(x, y);
           } else if (op == 2) {

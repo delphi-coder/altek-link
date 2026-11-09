@@ -15,6 +15,21 @@ public final class UiLogicTest {
   }
   static Store.Peer peer(String id,String name,long seen){Store.Peer p=new Store.Peer();p.id=id;p.name=name;p.seen=seen;return p;}
   public static void main(String[] args){
+    ScreenStartupFrames startup=new ScreenStartupFrames();
+    startup.offer(false,1,new byte[]{1});
+    check(startup.take()==null,"Startup rejects deltas before keyframe");
+    startup.offer(true,2,new byte[]{2}); startup.offer(false,3,new byte[]{3});
+    ScreenStartupFrames.Frame first=startup.take(),secondFrame=startup.take();
+    check(first.key&&first.pts==2&&!secondFrame.key&&secondFrame.pts==3,"Startup retains frame chain in order");
+    startup.offer(true,4,new byte[]{4}); startup.offer(false,5,new byte[]{5});
+    startup.offer(true,6,new byte[]{6});
+    check(startup.take().pts==6&&startup.take()==null,"New keyframe replaces obsolete startup chain");
+    startup.offer(true,7,new byte[]{7});
+    for(int i=1;i<ScreenStartupFrames.MAX_FRAMES;i++) startup.offer(false,7+i,new byte[]{1});
+    startup.offer(false,99,new byte[]{1}); startup.offer(false,100,new byte[]{1});
+    check(startup.take()==null,"Startup overflow discards incomplete chain");
+    startup.offer(true,101,new byte[]{1});
+    check(startup.take().pts==101,"Startup recovers at next keyframe");
     VideoOptions defaults=new VideoOptions();
     check(defaults.isDefault()&&defaults.fps==15&&defaults.bitrate==4000000&&defaults.keySeconds==1,"Video defaults preserve tested settings");
     check(VideoOptions.periodNs(10)==100000000L&&VideoOptions.periodNs(25)==40000000L,"Frame pacing follows configured FPS");
