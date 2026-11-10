@@ -2,6 +2,10 @@
 
 User-facing updates for ALTEK Link. Earlier Windows-only notes are available in [windows/docs/CHANGES.md](windows/docs/CHANGES.md).
 
+## Unreleased
+
+- Load smaller, responsive screenshots on the project website.
+
 ## Android 0.2.0 build 3 and Windows 0.2.0 build 2 (2026-11-09)
 
 - Share copied text between devices during remote control. Choose controller to remote, remote to controller, both directions, or turn sharing off.
