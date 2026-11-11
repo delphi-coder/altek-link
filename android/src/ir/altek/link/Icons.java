@@ -32,7 +32,15 @@ public final class Icons extends Drawable {
     p.setStyle(Paint.Style.STROKE);
     p.setStrokeCap(Paint.Cap.ROUND);
     p.setStrokeJoin(Paint.Join.ROUND);
-    if (kind.equals("video")) {
+    if (kind.equals("keyboard")) {
+      c.drawRoundRect(new RectF(2, 5, 22, 19), 2, 2, p);
+      p.setStrokeWidth(1.5f);
+      for (int x = 6; x <= 18; x += 4) {
+        c.drawPoint(x, 9, p);
+        c.drawPoint(x, 12, p);
+      }
+      c.drawLine(8, 16, 16, 16, p);
+    } else if (kind.equals("video")) {
       c.drawRoundRect(new RectF(2, 6, 16, 18), 2, 2, p);
       Path v = new Path();
       v.moveTo(16, 10);

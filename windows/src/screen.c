@@ -497,6 +497,30 @@ static void control_exec(int op, const unsigned char *b, int len)
         in[0].mi.dy = (LONG)(y2 * 65535.0f);
         SendInput(1, in, sizeof(INPUT));
         break;
+    case 15: /* Unicode text: UTF-8, at most 64 bytes */
+        if (len > 2 && len <= 66)
+        {
+            WCHAR text[64];
+            INPUT keys[128];
+            int count, i, sent;
+            count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                        (const char *)b + 2, len - 2, text, 64);
+            if (count <= 0)
+                break;
+            memset(keys, 0, sizeof(keys));
+            for (i = 0; i < count; i++)
+            {
+                keys[i * 2].type = INPUT_KEYBOARD;
+                keys[i * 2].ki.wScan = text[i];
+                keys[i * 2].ki.dwFlags = KEYEVENTF_UNICODE;
+                keys[i * 2 + 1] = keys[i * 2];
+                keys[i * 2 + 1].ki.dwFlags |= KEYEVENTF_KEYUP;
+            }
+            sent = (int)SendInput((UINT)(count * 2), keys, sizeof(INPUT));
+            if (sent != count * 2)
+                log_event("REMOTE_TEXT", "SendInput incomplete error=%lu", (unsigned long)GetLastError());
+        }
+        break;
     case 13: /* keyboard: [i32 vk][i32 down] */
         if (len < 10)
         {
@@ -920,6 +944,8 @@ void screen_run(struct call *c)
     }
     else if (codec_available())
     {
+        unsigned char text_capability[3] = {3, 16, 1};
+        media_packet(c, text_capability, sizeof(text_capability));
         /* Shared side: capture this desktop and share it. */
         cap = (HANDLE)_beginthreadex(NULL, 0, screen_capture, c, 0, NULL);
         cursor = (HANDLE)_beginthreadex(NULL, 0, screen_cursor_watch, c, 0, NULL);

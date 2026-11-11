@@ -311,6 +311,33 @@ public final class MainActivity extends Activity {
             chat(peers.get(n).id);
           }
         });
+    list.setOnItemLongClickListener(
+        new AdapterView.OnItemLongClickListener() {
+          public boolean onItemLongClick(AdapterView<?> a, View v, int n, long id) {
+            final Store.Peer peer = peers.get(n);
+            new AlertDialog.Builder(MainActivity.this)
+                .setTitle("Delete " + peer.name + "?")
+                .setMessage("This will permanently delete this device, its messages, files stored by ALTEK Link, and its permissions. If it is still nearby, it may appear again. Continue?")
+                .setPositiveButton("Delete", new DialogInterface.OnClickListener() {
+                  public void onClick(DialogInterface dialog, int which) {
+                    try {
+                      db.forget(peer.id);
+                      LinkService s = LinkService.current;
+                      if (s != null) s.change();
+                      rendered = "";
+                      refresh();
+                      toast("Device deleted");
+                    } catch (Exception e) {
+                      DebugLog.error("DELETE_DEVICE", e);
+                      toast("Could not delete device");
+                    }
+                  }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+            return true;
+          }
+        });
     refresh();
   }
 

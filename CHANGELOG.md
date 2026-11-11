@@ -2,8 +2,12 @@
 
 User-facing updates for ALTEK Link. Earlier Windows-only notes are available in [windows/docs/CHANGES.md](windows/docs/CHANGES.md).
 
-## Unreleased
+## Android 0.2.0 build 6 and Windows 0.2.0 build 4 (2026-11-11)
 
+- Use your Android keyboard while controlling a remote screen. Type directly into Windows applications, including Persian and other Unicode text, using the language selected on your phone.
+- Send navigation and other supported special keys from the Android keyboard during remote control.
+- Remove an old Android contact by holding it in the device list. After confirmation, its conversation, locally stored attachments and permissions are deleted.
+- Find Windows audio, video and screen-sharing calls in their own taskbar window. Incoming calls are brought forward, with a taskbar alert when Windows restricts focus.
 - Load smaller, responsive screenshots on the project website.
 
 ## Android 0.2.0 build 3 and Windows 0.2.0 build 2 (2026-11-09)

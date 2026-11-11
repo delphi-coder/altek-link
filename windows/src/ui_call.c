@@ -895,9 +895,10 @@ void ui_call_register(void)
 }
 void ui_call_update(void)
 {
-    int active;
+    int active, incoming;
     EnterCriticalSection(&app.lock);
     active = app.call != NULL;
+    incoming = active && !app.call->outgoing && !app.call->accepted;
     LeaveCriticalSection(&app.lock);
     if (active && !ui_call)
     {
@@ -910,9 +911,27 @@ void ui_call_update(void)
             widths[i] = heights[i] = 0;
         }
         LeaveCriticalSection(&app.lock);
-        ui_call = CreateWindowExW(0, L"AltekCall", L"ALTEK Link - Call",
+        ui_call = CreateWindowExW(WS_EX_APPWINDOW, L"AltekCall", L"ALTEK Link - Call",
                                   WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN, CW_USEDEFAULT,
-                                  CW_USEDEFAULT, 760, 610, app.window, NULL, app.instance, NULL);
+                                  CW_USEDEFAULT, 760, 610, NULL, NULL, app.instance, NULL);
+        if (ui_call && incoming && SetForegroundWindow(ui_call))
+        {
+            SetFocus(ui_call);
+        }
+        else if (ui_call && incoming)
+        {
+            FLASHWINFO flash;
+            /* Respect the foreground lock while still making the incoming call visible. */
+            SetWindowPos(ui_call, HWND_TOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            SetWindowPos(ui_call, HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            memset(&flash, 0, sizeof(flash));
+            flash.cbSize = sizeof(flash);
+            flash.hwnd = ui_call;
+            flash.dwFlags = FLASHW_ALL | FLASHW_TIMERNOFG;
+            FlashWindowEx(&flash);
+        }
     }
     if (!active && ui_call)
     {

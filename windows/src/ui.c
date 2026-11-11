@@ -958,6 +958,10 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     if (msg == WM_DESTROY)
     {
         KillTimer(hwnd, 1);
+        if (ui_call)
+        {
+            DestroyWindow(ui_call);
+        }
         if (bar_brush)
         {
             DeleteObject(bar_brush);

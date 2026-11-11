@@ -5,6 +5,8 @@ each other locally and can exchange messages and files, make audio/video calls, 
 control screens without an account, cloud service, or central server.
 During remote control, text clipboard sharing can be turned off or set to either direction or both.
 Android 10 and later may require returning to ALTEK Link before copied text can be read.
+The Android viewer can also use the phone's keyboard to type into a remote Windows PC, including
+Unicode text. To remove a device and its local conversation, hold it in the Android device list.
 
 The active clients are:
 

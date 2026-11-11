@@ -30,6 +30,26 @@ public final class RemoteInputTest {
         && "?".equals(RemoteKeyText.character(0xbf, true, false))
         && "\\".equals(RemoteKeyText.character(0xdc, false, false)), "Digits and punctuation");
 
+    check(RemoteKeyboard.encodedCharacter('n') == 0x4e
+        && RemoteKeyboard.encodedCharacter('N') == (0x4e | 256)
+        && RemoteKeyboard.encodedCharacter('/') == 0xbf
+        && RemoteKeyboard.encodedCharacter('?') == (0xbf | 256)
+        && RemoteKeyboard.encodedCharacter('\u0627') == -1, "Android IME character mapping");
+    check(RemoteKeyboard.virtualKey(android.view.KeyEvent.KEYCODE_ENTER) == 0x0d
+        && RemoteKeyboard.virtualKey(android.view.KeyEvent.KEYCODE_DEL) == 0x08
+        && RemoteKeyboard.virtualKey(android.view.KeyEvent.KEYCODE_CTRL_LEFT) == 0x11,
+        "Android special keys map to Windows virtual keys");
+
+    String unicode = "\u0633\u0644\u0627\u0645 \ud83d\ude00";
+    byte[] textPacket = ScreenEngine.textPacket(unicode);
+    check(textPacket[0] == 3 && textPacket[1] == 15
+        && unicode.equals(new String(textPacket, 2, textPacket.length - 2, "UTF-8")),
+        "Screen text packet preserves Persian and supplementary Unicode");
+    char[] large = new char[65];
+    java.util.Arrays.fill(large, 'x');
+    check(ScreenEngine.textPacket("") == null && ScreenEngine.textPacket(new String(large)) == null,
+        "Screen text packet enforces protocol bounds");
+
     final ScreenPacketQueue queue = new ScreenPacketQueue();
     final CountDownLatch started = new CountDownLatch(1), received = new CountDownLatch(1);
     final byte[][] result = new byte[1][];

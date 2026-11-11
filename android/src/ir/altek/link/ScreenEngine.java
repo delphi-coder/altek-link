@@ -65,6 +65,7 @@ public final class ScreenEngine {
   private final ControlListener control;
   private final Listener listener;
   private volatile boolean running = true;
+  private volatile boolean peerAcceptsText;
   private volatile ScreenClipboard clipboard;
   private int pendingClipboardMode = -1;
   private String pendingClipboardText;
@@ -128,6 +129,25 @@ public final class ScreenEngine {
     enqueueControl(new byte[] { KIND_CONTROL, 16, 1 });
   }
 
+  public boolean peerAcceptsText() { return peerAcceptsText; }
+
+  static byte[] textPacket(String text) throws UnsupportedEncodingException {
+    byte[] bytes = text.getBytes("UTF-8");
+    if (bytes.length == 0 || bytes.length > 64) return null;
+    byte[] packet = new byte[bytes.length + 2];
+    packet[0] = KIND_CONTROL;
+    packet[1] = 15;
+    System.arraycopy(bytes, 0, packet, 2, bytes.length);
+    return packet;
+  }
+
+  public void sendText(String text) {
+    try {
+      byte[] packet = textPacket(text);
+      if (packet != null) enqueueControl(packet);
+    } catch (Exception e) { error(e); }
+  }
+
   public void sendFormat(boolean h264, int w, int h, byte[] config) {
     try {
       ByteArrayOutputStream b = new ByteArrayOutputStream();
@@ -179,6 +199,20 @@ public final class ScreenEngine {
       o.writeByte(KIND_CONTROL);
       o.writeByte(3);
       o.writeInt(action);
+      enqueueControl(b.toByteArray());
+    } catch (Exception e) {
+      error(e);
+    }
+  }
+
+  public void sendKeyCode(int vk, boolean down) {
+    try {
+      ByteArrayOutputStream b = new ByteArrayOutputStream();
+      DataOutputStream o = new DataOutputStream(b);
+      o.writeByte(KIND_CONTROL);
+      o.writeByte(13);
+      o.writeInt(vk);
+      o.writeInt(down ? 1 : 0);
       enqueueControl(b.toByteArray());
     } catch (Exception e) {
       error(e);
@@ -300,6 +334,8 @@ public final class ScreenEngine {
             peerClipboardMode(b[2]);
           } else if (op == 18 && b.length <= 65538) {
             peerClipboardText(new String(b, 2, b.length - 2, "UTF-8"));
+          } else if (op == 16 && b.length == 3 && b[2] == 1) {
+            peerAcceptsText = true;
           } else if (op == 1) {
             float x = packet.readFloat(), y = packet.readFloat();
             if (control != null) control.tap(x, y);

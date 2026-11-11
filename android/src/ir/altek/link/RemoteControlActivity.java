@@ -104,6 +104,9 @@ public final class RemoteControlActivity extends Activity implements TextureView
   private boolean captureRequested; // sharer side: avoids asking for MediaProjection twice
   private boolean navShown; // controller side: shows the Back/Home/Recents buttons once, not every poll
   private ImageButton backBtn, homeBtn, recentsBtn, fitBtn;
+  private ImageButton keyboardBtn;
+  private RemoteKeyboard keyboard;
+  private boolean keyboardShown;
   private LinearLayout root; // inner layout: stage + buttons, orientation-driven
   private LinearLayout buttons;
   private static final int REQUEST_PROJECTION = 4821;
@@ -188,6 +191,21 @@ public final class RemoteControlActivity extends Activity implements TextureView
           }
         });
     root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1));
+
+    keyboard = new RemoteKeyboard(this, new RemoteKeyboard.Target() {
+      public void key(int vk, boolean down) {
+        if (engine != null) engine.sendKeyCode(vk, down);
+      }
+      public boolean acceptsText() { return engine != null && engine.peerAcceptsText(); }
+      public void text(String value) { if (engine != null) engine.sendText(value); }
+      public void unsupported() {
+        Toast.makeText(RemoteControlActivity.this,
+            "This keyboard input is not supported by the current Windows version", Toast.LENGTH_SHORT).show();
+      }
+      public void hidden() { hideKeyboard(); }
+    });
+    FrameLayout.LayoutParams keyboardParams = new FrameLayout.LayoutParams(1, 1, Gravity.TOP | Gravity.LEFT);
+    outer.addView(keyboard, keyboardParams);
 
     buttons = new LinearLayout(this);
     buttons.setBackgroundColor(0xff172a2b);
@@ -275,6 +293,32 @@ public final class RemoteControlActivity extends Activity implements TextureView
           }).show();
     }});
     buttons.addView(clip);
+    keyboardBtn = new ImageButton(this);
+    keyboardBtn.setScaleType(ImageView.ScaleType.FIT_CENTER);
+    keyboardBtn.setImageDrawable(new Icons("keyboard", Color.WHITE));
+    keyboardBtn.setBackgroundColor(0xff1a3a3d);
+    keyboardBtn.setPadding(dp(12), dp(12), dp(12), dp(12));
+    keyboardBtn.setContentDescription("Show or hide keyboard");
+    keyboardBtn.setVisibility(View.GONE);
+    keyboardBtn.setOnClickListener(new View.OnClickListener() {
+      public void onClick(View v) {
+        if (keyboardShown) hideKeyboard();
+        else if (engine != null) {
+          keyboardShown = true;
+          getWindow().getDecorView().setSystemUiVisibility(0);
+          getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+          keyboard.requestFocus();
+          keyboard.post(new Runnable() {
+            public void run() {
+              if (keyboardShown)
+                ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+                    .showSoftInput(keyboard, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+            }
+          });
+        }
+      }
+    });
+    buttons.addView(keyboardBtn);
     buttons.addView(backBtn);
     buttons.addView(homeBtn);
     buttons.addView(recentsBtn);
@@ -349,6 +393,14 @@ public final class RemoteControlActivity extends Activity implements TextureView
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
   }
 
+  private void hideKeyboard() {
+    keyboardShown = false;
+    ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+        .hideSoftInputFromWindow(keyboard.getWindowToken(), 0);
+    keyboard.clearFocus();
+    applyFullscreen();
+  }
+
   /** A Back/Home/Recents button sent to the remote device - not local navigation. */
   private ImageButton navButton(String icon, final int globalAction) {
     ImageButton b = new ImageButton(this);
@@ -404,6 +456,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
 
   /** Viewer-side cleanup only; the sharing side has nothing local to tear down any more. */
   private void teardown() {
+    if (keyboard != null) keyboard.close();
     if (clipboard != null) { clipboard.close(); clipboard = null; }
     remoteTap.reset();
     if (engine != null) {
@@ -922,6 +975,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
               backBtn.setVisibility(View.VISIBLE);
               homeBtn.setVisibility(View.VISIBLE);
               recentsBtn.setVisibility(View.VISIBLE);
+              keyboardBtn.setVisibility(View.VISIBLE);
             }
             if (c.socket != null && engine == null) {
               try {

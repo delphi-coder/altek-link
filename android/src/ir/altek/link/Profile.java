@@ -33,6 +33,11 @@ public final class Profile {
     changed();
   }
 
+  public static synchronized void forget(Context c, String peer) {
+    prefs(c).edit().remove(peer).commit();
+    cleanup(c);
+  }
+
   private static void changed() {
     LinkService s = LinkService.current;
     if (s != null) {

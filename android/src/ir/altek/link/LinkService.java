@@ -810,7 +810,10 @@ public final class LinkService extends Service {
               if (!Wire.hex(hash.digest()).equals(meta.getString("hash")))
                 throw new IOException("Checksum mismatch");
               if (!temp.renameTo(finalFile)) throw new IOException("Rename failed");
-              db.path(m.id, finalFile.getAbsolutePath(), "downloaded");
+              if (!db.path(m.id, finalFile.getAbsolutePath(), "downloaded")) {
+                finalFile.delete();
+                throw new IOException("Conversation removed during download");
+              }
               reply(out, true, "");
               change();
               DebugLog.event("FILE_RX", "bytes=" + size);

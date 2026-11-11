@@ -3,11 +3,14 @@ package ir.altek.link;
 import android.content.*;
 import android.database.Cursor;
 import android.database.sqlite.*;
+import java.io.File;
 import java.util.*;
 
 public final class Store extends SQLiteOpenHelper {
+  private final Context context;
   public Store(Context c) {
     super(c, "link.db", null, 3);
+    context = c.getApplicationContext();
   }
 
   public void onCreate(SQLiteDatabase d) {
@@ -119,29 +122,79 @@ public final class Store extends SQLiteOpenHelper {
     return null;
   }
 
+  /** Delete one peer and all its messages as one database operation. */
+  public synchronized void forget(String id) {
+    SQLiteDatabase d = getWritableDatabase();
+    ArrayList<String> paths = new ArrayList<String>();
+    d.beginTransaction();
+    try {
+      Cursor c = d.rawQuery("SELECT path FROM messages WHERE peer=? AND path<>''", new String[] {id});
+      try {
+        while (c.moveToNext()) paths.add(c.getString(0));
+      } finally {
+        c.close();
+      }
+      d.delete("messages", "peer=?", new String[] {id});
+      d.delete("peers", "id=?", new String[] {id});
+      for (Iterator<String> i = paths.iterator(); i.hasNext(); ) {
+        Cursor refs = d.rawQuery("SELECT 1 FROM messages WHERE path=? LIMIT 1", new String[] {i.next()});
+        try { if (refs.moveToFirst()) i.remove(); } finally { refs.close(); }
+      }
+      d.setTransactionSuccessful();
+    } finally {
+      d.endTransaction();
+    }
+    for (String path : paths) deleteOwnedAttachment(path);
+    Profile.forget(context, id);
+  }
+
+  private void deleteOwnedAttachment(String path) {
+    try {
+      File f = new File(path).getCanonicalFile();
+      File sent = new File(context.getFilesDir(), "sent").getCanonicalFile();
+      File received = new File(context.getFilesDir(), "received").getCanonicalFile();
+      if (sent.equals(f.getParentFile()) || received.equals(f.getParentFile())) f.delete();
+    } catch (java.io.IOException ignored) {
+      // Never delete a path that cannot be verified as an app-owned attachment.
+    }
+  }
+
   public synchronized boolean add(
       String id, String peer, String kind, String body, String path, boolean mine, String state) {
-    Msg existing = message(id);
-    if (existing != null) {
-      if (!existing.peer.equals(peer)
-          || existing.mine != mine
-          || !existing.kind.equals(kind)
-          || !existing.body.equals(body)) throw new SQLiteException("Message identity collision");
-      return false;
+    SQLiteDatabase d = getWritableDatabase();
+    d.beginTransaction();
+    try {
+      Cursor contact = d.rawQuery("SELECT 1 FROM peers WHERE id=?", new String[] {peer});
+      try {
+        if (!contact.moveToFirst()) throw new SQLiteException("Device was removed");
+      } finally {
+        contact.close();
+      }
+      Msg existing = message(id);
+      if (existing != null) {
+        if (!existing.peer.equals(peer)
+            || existing.mine != mine
+            || !existing.kind.equals(kind)
+            || !existing.body.equals(body)) throw new SQLiteException("Message identity collision");
+        d.setTransactionSuccessful();
+        return false;
+      }
+      ContentValues v = new ContentValues();
+      v.put("id", id);
+      v.put("peer", peer);
+      v.put("kind", kind);
+      v.put("body", body);
+      v.put("path", path);
+      v.put("mine", mine ? 1 : 0);
+      v.put("state", state);
+      v.put("time", System.currentTimeMillis());
+      if (d.insertWithOnConflict("messages", null, v, SQLiteDatabase.CONFLICT_IGNORE) == -1)
+        throw new SQLiteException("Message was not persisted");
+      d.setTransactionSuccessful();
+      return true;
+    } finally {
+      d.endTransaction();
     }
-    ContentValues v = new ContentValues();
-    v.put("id", id);
-    v.put("peer", peer);
-    v.put("kind", kind);
-    v.put("body", body);
-    v.put("path", path);
-    v.put("mine", mine ? 1 : 0);
-    v.put("state", state);
-    v.put("time", System.currentTimeMillis());
-    if (getWritableDatabase()
-            .insertWithOnConflict("messages", null, v, SQLiteDatabase.CONFLICT_IGNORE)
-        == -1) throw new SQLiteException("Message was not persisted");
-    return true;
   }
 
   public synchronized void state(String id, String state) {
@@ -150,11 +203,11 @@ public final class Store extends SQLiteOpenHelper {
     getWritableDatabase().update("messages", v, "id=?", new String[] {id});
   }
 
-  public synchronized void path(String id, String path, String state) {
+  public synchronized boolean path(String id, String path, String state) {
     ContentValues v = new ContentValues();
     v.put("path", path);
     v.put("state", state);
-    getWritableDatabase().update("messages", v, "id=?", new String[] {id});
+    return getWritableDatabase().update("messages", v, "id=?", new String[] {id}) > 0;
   }
 
   public synchronized ArrayList<Msg> messages(String peer) {

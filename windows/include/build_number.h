@@ -2,6 +2,6 @@
 #define ALTEK_BUILD_NUMBER_H
 
 /* Increment once before each logical source build cycle. */
-#define APP_BUILD 2
+#define APP_BUILD 4
 
 #endif
