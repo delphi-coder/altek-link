@@ -58,7 +58,6 @@
 #define MAX_MESSAGES 10000
 #define MAX_JSON 65536
 #define MAX_MEDIA (2 * 1024 * 1024)
-#define MAX_FILE (100 * 1024 * 1024)
 #define UI_UPDATE (WM_APP + 1)
 #define UI_NOTICE (WM_APP + 2)
 #define UI_FRAME (WM_APP + 3)
@@ -75,8 +74,8 @@ struct message
 {
     char id[40], peer[65], kind[16], state[40], hash[65];
     char *text;
-    WCHAR path[MAX_PATH], filename[180];
-    unsigned long size;
+    WCHAR path[MAX_PATH], filename[180], receive_dir[MAX_PATH];
+    uint64_t size;
     uint64_t created;
     int mine, busy;
 };
@@ -108,7 +107,7 @@ struct app
     HANDLE worker_event;
     HWND window;
     HINSTANCE instance;
-    WCHAR dir[MAX_PATH], exe_dir[MAX_PATH];
+    WCHAR dir[MAX_PATH], exe_dir[MAX_PATH], receive_dir[MAX_PATH];
     char name[256], id[65], avatar[65];
     int camera_index, width, height, fps, bitrate, rx_rotate, theme;
     int minimize_screen_share, remote_pinch_mode;
@@ -131,7 +130,8 @@ int random_hex(char *out, int bytes);
 int valid_hex(const char *s, int n);
 int valid_uuid(const char *s);
 int digest(const void *data, DWORD size, char *hex);
-int digest_file(const WCHAR *path, char *hex, unsigned long *size);
+int hash_finish(HCRYPTHASH h, char *hex);
+int digest_file(const WCHAR *path, char *hex, uint64_t *size);
 void log_event(const char *tag, const char *fmt, ...);
 void notice(const char *text);
 void changed(void);

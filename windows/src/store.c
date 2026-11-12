@@ -16,7 +16,7 @@ static void ini_int(const WCHAR *key, int v, const WCHAR *p)
 }
 static void ini_string(const WCHAR *key, const WCHAR *value, const WCHAR *p)
 {
-    WCHAR current[256];
+    WCHAR current[MAX_PATH];
     GetPrivateProfileStringW(L"settings", key, L"{missing}", current, countof(current), p);
     if (lstrcmpW(current, value))
     {
@@ -33,6 +33,7 @@ static int ini_create(const WCHAR *p)
         "\r\n[settings]\r\n"
         "; Device name visible to other devices.\r\nname=\r\n"
         "; Avatar identifier; managed by the application.\r\navatar=\r\n"
+        "; Received-file folder; blank uses the app data folder.\r\nreceive_dir=\r\n"
         "\r\n; Camera index, output dimensions, frame rate and bitrate (bits per second).\r\n"
         "camera=0\r\nwidth=320\r\nheight=240\r\nfps=15\r\nbitrate=4000000\r\n"
         "; Received camera video rotation: 0, 90, 180 or 270 degrees.\r\nrx_rotate=90\r\n"
@@ -75,6 +76,7 @@ void settings_save(void)
     ini_string(L"name", s, p);
     wide(app.avatar, s, 256);
     ini_string(L"avatar", s, p);
+    ini_string(L"receive_dir", app.receive_dir, p);
     ini_int(L"camera", app.camera_index, p);
     ini_int(L"width", app.width, p);
     ini_int(L"height", app.height, p);
@@ -203,7 +205,7 @@ struct message *message_find(const char *id, const char *peer)
 int message_save(struct message *m)
 {
     WCHAR path[MAX_PATH], leaf[140];
-    char path8[1024], file8[768], *text, *qp, *qf, *out;
+    char path8[1024], file8[768], folder8[1024], *text, *qp, *qf, *qd, *out;
     size_t cap;
     int ok = 0;
     EnterCriticalSection(&app.lock);
@@ -212,23 +214,26 @@ int message_save(struct message *m)
     utf8(m->filename, file8, sizeof(file8));
     qp = json_quote(path8);
     qf = json_quote(file8);
-    if (!text || !qp || !qf)
+    utf8(m->receive_dir, folder8, sizeof(folder8));
+    qd = json_quote(folder8);
+    if (!text || !qp || !qf || !qd)
     {
         free(text);
         free(qp);
         free(qf);
+        free(qd);
         LeaveCriticalSection(&app.lock);
         return 0;
     }
-    cap = strlen(text) + strlen(qp) + strlen(qf) + 1024;
+    cap = strlen(text) + strlen(qp) + strlen(qf) + strlen(qd) + 1024;
     out = (char *)malloc(cap);
     if (out)
     {
         _snprintf(
             out, cap,
             "{\"id\":\"%s\",\"peer\":\"%s\",\"kind\":\"%s\",\"text\":%s,\"mine\":%s,\"state\":\"%"
-            "s\",\"path\":%s,\"filename\":%s,\"size\":%lu,\"hash\":\"%s\",\"created\":\"%I64u\"}",
-            m->id, m->peer, m->kind, text, m->mine ? "true" : "false", m->state, qp, qf, m->size,
+            "s\",\"path\":%s,\"filename\":%s,\"receive_dir\":%s,\"size\":%I64u,\"hash\":\"%s\",\"created\":\"%I64u\"}",
+            m->id, m->peer, m->kind, text, m->mine ? "true" : "false", m->state, qp, qf, qd, m->size,
             m->hash, m->created);
         _snwprintf(leaf, 140, L"messages\\%S_%S.json", m->peer, m->id);
         path_join(path, app.dir, leaf);
@@ -242,6 +247,7 @@ int message_save(struct message *m)
     free(text);
     free(qp);
     free(qf);
+    free(qd);
     LeaveCriticalSection(&app.lock);
     return ok;
 }
@@ -319,6 +325,7 @@ void store_init(void)
     if (ini_create(p)) ini_string(L"name", host, p);
     GetPrivateProfileStringW(L"settings", L"name", host, w, 256, p);
     utf8(w, app.name, 256);
+    GetPrivateProfileStringW(L"settings", L"receive_dir", L"", app.receive_dir, MAX_PATH, p);
     GetPrivateProfileStringW(L"settings", L"avatar", L"", w, 256, p);
     utf8(w, app.avatar, 65);
     if (app.avatar[0] && !valid_hex(app.avatar, 64))
@@ -453,8 +460,10 @@ void store_init(void)
                     wide(temp, m->path, MAX_PATH);
                     json_get(&j, "filename", temp, sizeof(temp));
                     wide(temp, m->filename, 180);
+                    json_get(&j, "receive_dir", temp, sizeof(temp));
+                    wide(temp, m->receive_dir, MAX_PATH);
                     json_get(&j, "hash", m->hash, 65);
-                    m->size = json_num(&j, "size", 0);
+                    if (!json_u64(&j, "size", &m->size)) m->size = 0;
                     json_get(&j, "created", temp, sizeof(temp));
                     m->created = _strtoui64(temp, NULL, 10);
                     if (m->text)

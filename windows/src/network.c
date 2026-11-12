@@ -122,7 +122,7 @@ static unsigned __stdcall handle(void *arg)
         char b[1024], *q = json_quote(app.name);
         if (q)
         {
-            _snprintf(b, sizeof(b), "{\"ok\":true,\"name\":%s,\"id\":\"%s\",\"avatar\":\"%s\"}", q,
+            _snprintf(b, sizeof(b), "{\"ok\":true,\"name\":%s,\"id\":\"%s\",\"avatar\":\"%s\",\"file_stream\":true}", q,
                       app.id, app.avatar);
             b[sizeof(b) - 1] = 0;
             wire_json(t, b);
@@ -180,16 +180,16 @@ static unsigned __stdcall handle(void *arg)
         log_event("TEXT_RX", "peer=%.8s", t->peer);
         changed();
     }
-    else if (!strcmp(type, "offer"))
+    else if (!strcmp(type, "offer") || !strcmp(type, "offer_stream"))
     {
         char filename[768], hash[65] = "", kind[16] = "";
-        long size = json_num(&j, "size", -1);
+        uint64_t size;
         WCHAR w[180];
         int k;
         json_get(&j, "hash", hash, 65);
         json_get(&j, "filename", filename, sizeof(filename));
         json_get(&j, "kind", kind, 16);
-        if (size < 0 || size > MAX_FILE || !valid_hex(hash, 64))
+        if (!json_u64(&j, "size", &size) || size > INT64_MAX || (!strcmp(type, "offer") && !valid_hex(hash, 64)))
         {
             reply(t, 0, "Invalid offer");
             goto done;
@@ -230,31 +230,83 @@ static unsigned __stdcall handle(void *arg)
     {
         HANDLE f;
         DWORD got;
-        unsigned char buf[32768];
+        unsigned char buf[262144];
         int ok = 1;
-        unsigned long left;
+        uint64_t left;
+        LARGE_INTEGER file_size, seek;
+        uint64_t offset = 0, prefix;
+        char offset_reply[128], stream_hash[65];
+        HCRYPTPROV hp = 0;
+        HCRYPTHASH hh = 0;
+        int streaming;
         m = message_find(id, t->peer);
         if (!m || !m->mine || !strcmp(m->kind, "text"))
         {
             reply(t, 0, "File not authorized");
             goto done;
         }
+        streaming = !m->hash[0];
+        if (streaming && !json_bool(&j, "sha256_trailer"))
+        {
+            reply(t, 0, "Streaming digest required");
+            goto done;
+        }
+        if (streaming && (!CryptAcquireContextW(&hp, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT) ||
+                          !CryptCreateHash(hp, CALG_SHA_256, 0, 0, &hh)))
+        {
+            if (hp) CryptReleaseContext(hp, 0);
+            reply(t, 0, "Digest unavailable");
+            goto done;
+        }
         f = CreateFileW(m->path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         if (f == INVALID_HANDLE_VALUE)
         {
+            if (hh) CryptDestroyHash(hh);
+            if (hp) CryptReleaseContext(hp, 0);
             reply(t, 0, "File missing");
             goto done;
         }
         left = m->size;
-        if (GetFileSize(f, NULL) != left || !reply(t, 1, ""))
+        if (!GetFileSizeEx(f, &file_size) || file_size.QuadPart < 0 ||
+            (uint64_t)file_size.QuadPart != left)
         {
             CloseHandle(f);
+            if (hh) CryptDestroyHash(hh);
+            if (hp) CryptReleaseContext(hp, 0);
+            reply(t, 0, "Source changed or missing");
             goto done;
         }
-        while (left && app.running)
+        if (!json_u64(&j, "offset", &offset)) offset = 0;
+        if (offset > left)
         {
-            DWORD want = left > sizeof(buf) ? sizeof(buf) : left;
-            if (!ReadFile(f, buf, want, &got, NULL) || got != want || !tls_write(t, buf, got))
+            CloseHandle(f);
+            if (hh) CryptDestroyHash(hh);
+            if (hp) CryptReleaseContext(hp, 0);
+            reply(t, 0, "Invalid offset");
+            goto done;
+        }
+        seek.QuadPart = streaming ? 0 : offset;
+        _snprintf(offset_reply, sizeof(offset_reply), "{\"ok\":true,\"offset\":%I64u}", offset);
+        if (!SetFilePointerEx(f, seek, NULL, FILE_BEGIN) || !wire_json(t, offset_reply))
+        {
+            CloseHandle(f);
+            if (hh) CryptDestroyHash(hh);
+            if (hp) CryptReleaseContext(hp, 0);
+            goto done;
+        }
+        prefix = streaming ? offset : 0;
+        while (prefix && app.running)
+        {
+            DWORD want = prefix > sizeof(buf) ? sizeof(buf) : (DWORD)prefix;
+            if (!ReadFile(f, buf, want, &got, NULL) || got != want || !CryptHashData(hh, buf, got, 0)) { ok = 0; break; }
+            prefix -= got;
+        }
+        left -= offset;
+        while (ok && left && app.running)
+        {
+            DWORD want = left > sizeof(buf) ? sizeof(buf) : (DWORD)left;
+            if (!ReadFile(f, buf, want, &got, NULL) || got != want ||
+                (streaming && !CryptHashData(hh, buf, got, 0)) || !tls_write(t, buf, got))
             {
                 ok = 0;
                 break;
@@ -262,10 +314,24 @@ static unsigned __stdcall handle(void *arg)
             left -= got;
         }
         CloseHandle(f);
-        if (ok && !left)
+        if (streaming && ok && !left && !prefix)
         {
-            char *ack = (char *)wire_read(t, &n, MAX_JSON);
+            if (!hash_finish(hh, stream_hash)) ok = 0;
+            else
+            {
+                _snprintf(offset_reply, sizeof(offset_reply), "{\"hash\":\"%s\"}", stream_hash);
+                if (!wire_json(t, offset_reply)) ok = 0;
+            }
+        }
+        if (hh) CryptDestroyHash(hh);
+        if (hp) CryptReleaseContext(hp, 0);
+        if (ok && !left && !prefix)
+        {
+            DWORD ack_timeout = 4UL * 60UL * 60UL * 1000UL;
+            char *ack;
             struct json aj;
+            setsockopt(t->socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&ack_timeout, sizeof(ack_timeout));
+            ack = (char *)wire_read(t, &n, MAX_JSON);
             if (ack && json_parse(&aj, ack) && json_bool(&aj, "ok"))
             {
                 EnterCriticalSection(&app.lock);
@@ -470,6 +536,25 @@ static unsigned __stdcall send_pending(void *arg)
     else
     {
         char fn[768];
+        if (!m->hash[0])
+        {
+            struct json capabilities;
+            char *hello_body = envelope("hello", ""), *hello_reply = request(m->peer, hello_body);
+            free(hello_body);
+            if (!hello_reply) goto done;
+            if (!json_parse(&capabilities, hello_reply) || !json_bool(&capabilities, "file_stream"))
+            {
+                char legacy_hash[65];
+                uint64_t size;
+                free(hello_reply);
+                if (!digest_file(m->path, legacy_hash, &size) || size != m->size) goto done;
+                EnterCriticalSection(&app.lock);
+                copy_s(m->hash, 65, legacy_hash);
+                message_save(m);
+                LeaveCriticalSection(&app.lock);
+            }
+            else free(hello_reply);
+        }
         utf8(m->filename, fn, sizeof(fn));
         q = json_quote(fn);
         if (!q)
@@ -477,12 +562,12 @@ static unsigned __stdcall send_pending(void *arg)
             goto done;
         }
         _snprintf(fields, sizeof(fields),
-                  "\"id\":\"%s\",\"kind\":\"%s\",\"filename\":%s,\"size\":%lu,\"hash\":\"%s\","
+                  "\"id\":\"%s\",\"kind\":\"%s\",\"filename\":%s,\"size\":%I64u,\"hash\":\"%s\","
                   "\"mime\":\"application/octet-stream\"",
                   m->id, m->kind, q, m->size, m->hash);
         fields[sizeof(fields) - 1] = 0;
         free(q);
-        body = envelope("offer", fields);
+        body = envelope(m->hash[0] ? "offer" : "offer_stream", fields);
     }
     if (!body)
     {

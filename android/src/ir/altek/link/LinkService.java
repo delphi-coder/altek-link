@@ -325,6 +325,7 @@ public final class LinkService extends Service {
                 .put("name", name())
                 .put("id", identity.id)
                 .put("avatar", Profile.hash(this, "self"))
+                .put("file_stream", true)
                 .toString());
         return;
       }
@@ -344,13 +345,13 @@ public final class LinkService extends Service {
         if (fresh) notifyUser(display, "New message", peerId);
         DebugLog.event("TEXT_RX", "peer=" + shortId(peerId) + " new=" + fresh);
         change();
-      } else if ("offer".equals(type)) {
+      } else if ("offer".equals(type) || "offer_stream".equals(type)) {
         String id = validId(j);
         long size = j.getLong("size");
-        if (size < 0 || size > 100L * 1024 * 1024) throw new IOException("File limit 100 MB");
+        if (size < 0) throw new IOException("Invalid file size");
         String filename = Wire.safeName(j.getString("filename"));
-        String hash = j.getString("hash");
-        if (!hash.matches("[0-9a-f]{64}")) throw new IOException("Bad digest");
+        String hash = "offer_stream".equals(type) ? "" : j.getString("hash");
+        if (!"offer_stream".equals(type) && !hash.matches("[0-9a-f]{64}")) throw new IOException("Bad digest");
         String kind = "voice".equals(j.optString("kind")) ? "voice" : "file";
         JSONObject metadata =
             new JSONObject()
@@ -367,24 +368,52 @@ public final class LinkService extends Service {
         Store.Msg m = db.message(validId(j));
         if (m == null || !m.mine || !m.peer.equals(peerId) || "text".equals(m.kind))
           throw new IOException("File not authorized");
-        File f = new File(m.path);
         JSONObject meta = new JSONObject(m.body);
-        if (!f.exists() || f.length() != meta.getLong("size"))
-          throw new IOException("Source missing");
-        reply(out, true, "");
-        FileInputStream file = new FileInputStream(f);
-        try {
-          byte[] b = new byte[32768];
-          int n;
-          while ((n = file.read(b)) != -1 && live) out.write(b, 0, n);
-          out.flush();
-        } finally {
-          file.close();
+        long total = meta.getLong("size"), offset = j.optLong("offset", 0);
+        if (offset < 0 || offset > total) throw new IOException("Invalid offset");
+        boolean streaming = meta.optString("hash").length() == 0;
+        if (streaming && !j.optBoolean("sha256_trailer")) throw new IOException("Streaming digest required");
+        MessageDigest fileHash = streaming ? MessageDigest.getInstance("SHA-256") : null;
+        InputStream file;
+        if (m.path.startsWith("content://")) file = getContentResolver().openInputStream(android.net.Uri.parse(m.path));
+        else {
+          File f = new File(m.path);
+          if (!f.exists() || f.length() != total) throw new IOException("Source missing or changed");
+          file = new FileInputStream(f);
         }
+        if (file == null) throw new IOException("Source missing");
+        try {
+          Wire.text(out, new JSONObject().put("ok", true).put("offset", offset).toString());
+          byte[] b = new byte[262144];
+          long skip = offset;
+          while (skip > 0) {
+            if (streaming) {
+              int n = file.read(b, 0, (int)Math.min(b.length, skip));
+              if (n < 0) throw new EOFException();
+              fileHash.update(b, 0, n); skip -= n;
+            } else {
+              long n = file.skip(skip);
+              if (n <= 0) { if (file.read() < 0) throw new EOFException(); n = 1; }
+              skip -= n;
+            }
+          }
+          long remaining = total - offset;
+          while (remaining > 0 && live) {
+            int n = file.read(b, 0, (int)Math.min(b.length, remaining));
+            if (n < 0) throw new EOFException();
+            out.write(b, 0, n);
+            if (streaming) fileHash.update(b, 0, n);
+            remaining -= n;
+          }
+          if (remaining != 0) throw new EOFException();
+          out.flush();
+          if (streaming) Wire.text(out, new JSONObject().put("hash", Wire.hex(fileHash.digest())).toString());
+        } finally { file.close(); }
+        s.setSoTimeout(4 * 60 * 60 * 1000);
         JSONObject done = new JSONObject(Wire.readText(in));
         if (done.optBoolean("ok")) db.state(m.id, "transferred");
         change();
-        DebugLog.event("FILE_TX", "bytes=" + f.length());
+        DebugLog.event("FILE_TX", "bytes=" + total);
       } else if ("call".equals(type)) {
         Call c = new Call();
         c.id = validId(j);
@@ -673,8 +702,26 @@ public final class LinkService extends Service {
                     if ("text".equals(m.kind)) j.put("text", m.body);
                     else {
                       JSONObject meta = new JSONObject(m.body);
+                      if (meta.optString("hash").length() == 0) {
+                        JSONObject capabilities = request(p, hello("hello"));
+                        if (!capabilities.optBoolean("file_stream")) {
+                          MessageDigest legacy = MessageDigest.getInstance("SHA-256");
+                          InputStream source = m.path.startsWith("content://")
+                              ? getContentResolver().openInputStream(android.net.Uri.parse(m.path))
+                              : new FileInputStream(m.path);
+                          if (source == null) throw new IOException("Source missing");
+                          long count = 0;
+                          try {
+                            byte[] buffer = new byte[262144]; int n;
+                            while ((n = source.read(buffer)) != -1) { legacy.update(buffer, 0, n); count += n; }
+                          } finally { source.close(); }
+                          if (count != meta.getLong("size")) throw new IOException("Source changed");
+                          meta.put("hash", Wire.hex(legacy.digest()));
+                          if (!db.body(m.id, meta.toString())) throw new IOException("Message removed");
+                        }
+                      }
                       j =
-                          hello("offer")
+                          hello(meta.optString("hash").length() == 0 ? "offer_stream" : "offer")
                               .put("id", m.id)
                               .put("kind", m.kind)
                               .put("filename", meta.getString("filename"))
@@ -707,56 +754,62 @@ public final class LinkService extends Service {
             File dest = null;
             try {
               String filename = "attachment", mime = getContentResolver().getType(uri);
+              long knownSize = -1;
               android.database.Cursor c = getContentResolver().query(uri, null, null, null, null);
               if (c != null)
                 try {
                   int col = c.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
-                  if (c.moveToFirst() && col >= 0) filename = c.getString(col);
+                  if (c.moveToFirst()) {
+                    if (col >= 0) filename = c.getString(col);
+                    int sizeCol = c.getColumnIndex(android.provider.OpenableColumns.SIZE);
+                    if (sizeCol >= 0 && !c.isNull(sizeCol)) knownSize = c.getLong(sizeCol);
+                  }
                 } finally {
                   c.close();
                 }
-              if ("file".equals(uri.getScheme())) filename = new File(uri.getPath()).getName();
+              if ("file".equals(uri.getScheme())) { filename = new File(uri.getPath()).getName(); knownSize = new File(uri.getPath()).length(); }
               filename = Wire.safeName(filename == null ? "attachment" : filename);
               String id = Wire.uid();
-              File folder = new File(getFilesDir(), "sent");
-              folder.mkdirs();
-              dest = new File(folder, id);
-              InputStream in = getContentResolver().openInputStream(uri);
-              if (in == null) throw new IOException("Cannot open attachment");
-              MessageDigest hash = MessageDigest.getInstance("SHA-256");
-              long size = 0;
-              FileOutputStream out = new FileOutputStream(dest);
-              try {
-                byte[] b = new byte[32768];
-                int n;
-                while ((n = in.read(b)) != -1) {
-                  size += n;
-                  if (size > 100L * 1024 * 1024) throw new IOException("Maximum 100 MB");
-                  out.write(b, 0, n);
-                  hash.update(b, 0, n);
-                }
-              } finally {
-                Wire.close(in);
-                Wire.close(out);
+              boolean direct = "file".equals(kind) && "file".equals(uri.getScheme())
+                  && uri.getPath() != null && new File(uri.getPath()).isFile();
+              if (android.os.Build.VERSION.SDK_INT >= 19 && "content".equals(uri.getScheme())) {
+                direct = PersistedAccess.hasRead(LinkService.this, uri);
+              }
+              if (knownSize < 0) direct = false;
+              if (!direct) {
+                File folder = new File(getFilesDir(), "sent");
+                folder.mkdirs();
+                dest = new File(folder, id);
+              }
+              long size = knownSize;
+              if (!direct) {
+                InputStream in = getContentResolver().openInputStream(uri);
+                if (in == null) throw new IOException("Cannot open attachment");
+                FileOutputStream out = new FileOutputStream(dest);
+                size = 0;
+                try {
+                  byte[] b = new byte[262144]; int n;
+                  while ((n = in.read(b)) != -1) { out.write(b, 0, n); size += n; }
+                } finally { Wire.close(in); Wire.close(out); }
               }
               JSONObject meta =
                   new JSONObject()
                       .put("filename", filename)
                       .put("size", size)
-                      .put("hash", Wire.hex(hash.digest()))
+                      .put("hash", "")
                       .put(
                           "mime",
                           Mime.isGeneric(mime)
                               ? ("voice".equals(kind) ? "audio/3gpp" : Mime.resolve(null, filename, dest))
                               : mime);
-              db.add(id, peer, kind, meta.toString(), dest.getAbsolutePath(), true, "queued");
+              db.add(id, peer, kind, meta.toString(), direct ? ("file".equals(uri.getScheme()) ? uri.getPath() : uri.toString()) : dest.getAbsolutePath(), true, "queued");
               change();
               DebugLog.event("FILE_STAGED", "bytes=" + size);
               flush();
             } catch (Exception e) {
               if (dest != null) dest.delete();
               DebugLog.error("FILE_STAGE", e);
-              notifyUser("Attachment failed", "Limit 100 MB; check storage and picker", peer);
+              notifyUser("Attachment failed", "Check available storage and file access", peer);
             }
           }
         });
@@ -768,28 +821,37 @@ public final class LinkService extends Service {
         new Runnable() {
           public void run() {
             SSLSocket s = null;
-            File temp = null;
             try {
               Store.Peer p = db.peer(m.peer);
               if (p == null || !p.approved) throw new IOException("Untrusted");
               JSONObject meta = new JSONObject(m.body);
               long size = meta.getLong("size");
+              ReceiveTarget target = new ReceiveTarget(LinkService.this, m.id, meta.getString("filename"));
+              long offset = target.size();
+              if (offset > size) offset = 0;
+              target.checkSpace(size - offset);
+              MessageDigest hash = MessageDigest.getInstance("SHA-256");
+              target.digestPrefix(hash, offset);
               s = identity.connect(p.ip);
               if (!Identity.peer(s).equals(p.id)) throw new SSLException("Key changed");
               DataInputStream in = new DataInputStream(s.getInputStream());
               DataOutputStream out = new DataOutputStream(s.getOutputStream());
-              Wire.text(out, hello("download").put("id", m.id).toString());
+              boolean streaming = meta.optString("hash").length() == 0;
+              s.setSoTimeout(4 * 60 * 60 * 1000);
+              Wire.text(out, hello("download").put("id", m.id).put("offset", offset).put("sha256_trailer", streaming).toString());
               JSONObject reply = new JSONObject(Wire.readText(in));
               if (!reply.optBoolean("ok")) throw new IOException("Download refused");
-              File dir = new File(getFilesDir(), "received");
-              dir.mkdirs();
-              temp = new File(dir, m.id + ".part");
-              File finalFile = new File(dir, m.id);
-              MessageDigest hash = MessageDigest.getInstance("SHA-256");
-              FileOutputStream file = new FileOutputStream(temp);
-              long remaining = size, last = 0;
+              long accepted = reply.optLong("offset", 0);
+              if (accepted != offset) {
+                if (accepted != 0) throw new IOException("Invalid server offset");
+                offset = 0;
+                hash.reset();
+                target.checkSpace(size);
+              }
+              OutputStream file = target.output(offset);
+              long remaining = size - offset, last = 0;
               try {
-                byte[] b = new byte[32768];
+                byte[] b = new byte[262144];
                 while (remaining > 0) {
                   int n = in.read(b, 0, (int) Math.min(b.length, remaining));
                   if (n < 0) throw new EOFException();
@@ -798,30 +860,27 @@ public final class LinkService extends Service {
                   remaining -= n;
                   long now = System.currentTimeMillis();
                   if (now - last > 1000) {
-                    db.state(
-                        m.id, "receiving " + ((size - remaining) * 100 / Math.max(1, size)) + "%");
-                    change();
-                    last = now;
+                    db.state(m.id, "receiving " + (long) ((double)(size - remaining) * 100 / Math.max(1, size)) + "%");
+                    change(); last = now;
                   }
                 }
-              } finally {
-                file.close();
+              } finally { file.close(); }
+              String expectedHash = streaming ? new JSONObject(Wire.readText(in)).getString("hash") : meta.getString("hash");
+              if (!expectedHash.matches("[0-9a-f]{64}") || !Wire.hex(hash.digest()).equals(expectedHash)) {
+                target.discard();
+                throw new IOException("Checksum mismatch; retry from beginning");
               }
-              if (!Wire.hex(hash.digest()).equals(meta.getString("hash")))
-                throw new IOException("Checksum mismatch");
-              if (!temp.renameTo(finalFile)) throw new IOException("Rename failed");
-              if (!db.path(m.id, finalFile.getAbsolutePath(), "downloaded")) {
-                finalFile.delete();
+              String finishedPath = target.finish();
+              if (!db.path(m.id, finishedPath, "downloaded"))
                 throw new IOException("Conversation removed during download");
-              }
               reply(out, true, "");
               change();
               DebugLog.event("FILE_RX", "bytes=" + size);
             } catch (Exception e) {
-              if (temp != null) temp.delete();
               db.state(m.id, "retry download");
               change();
               DebugLog.error("FILE_RX", e);
+              notifyUser("Download failed", "Check destination access and available space, then retry", m.peer);
             } finally {
               Wire.close(s);
               sending.remove(m.id);

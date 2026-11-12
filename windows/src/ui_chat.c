@@ -607,21 +607,16 @@ static int item_sel(int index, int *s0, int *s1)
     *s1 = index == hm ? hc : SEL_END;
     return *s1 > *s0;
 }
-static void size_text(unsigned long size, WCHAR *out, int cap)
+static void size_text(uint64_t size, WCHAR *out, int cap)
 {
-    if (size >= 1048576UL)
-    {
-        unsigned long t = (size * 10UL) / 1048576UL;
-        _snwprintf(out, cap, L"%lu.%lu MB", t / 10, t % 10);
-    }
+    if (size >= 1073741824ULL)
+        _snwprintf(out, cap, L"%.1f GB", (double)size / 1073741824.0);
+    else if (size >= 1048576UL)
+        _snwprintf(out, cap, L"%.1f MB", (double)size / 1048576.0);
     else if (size >= 1024UL)
-    {
-        _snwprintf(out, cap, L"%lu KB", size / 1024UL);
-    }
+        _snwprintf(out, cap, L"%.1f KB", (double)size / 1024.0);
     else
-    {
-        _snwprintf(out, cap, L"%lu B", size);
-    }
+        _snwprintf(out, cap, L"%lu B", (unsigned long)size);
     out[cap - 1] = 0;
 }
 /* Buttons shown inside a received file bubble. Rectangles are in client coordinates. */

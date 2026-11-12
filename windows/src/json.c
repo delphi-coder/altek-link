@@ -327,6 +327,21 @@ int json_get(struct json *j, const char *key, char *out, size_t cap)
     out[at] = 0;
     return 1;
 }
+int json_u64(struct json *j, const char *key, uint64_t *out)
+{
+    int i = find(j, key), k;
+    uint64_t v = 0, digit;
+    if (i < 0 || j->tokens[i].start >= j->tokens[i].end) return 0;
+    for (k = j->tokens[i].start; k < j->tokens[i].end; k++)
+    {
+        if (j->s[k] < '0' || j->s[k] > '9') return 0;
+        digit = (unsigned)(j->s[k] - '0');
+        if (v > (UINT64_MAX - digit) / 10) return 0;
+        v = v * 10 + digit;
+    }
+    *out = v;
+    return 1;
+}
 long json_num(struct json *j, const char *key, long fallback)
 {
     int i = find(j, key);

@@ -203,6 +203,12 @@ public final class Store extends SQLiteOpenHelper {
     getWritableDatabase().update("messages", v, "id=?", new String[] {id});
   }
 
+  public synchronized boolean body(String id, String body) {
+    ContentValues v = new ContentValues();
+    v.put("body", body);
+    return getWritableDatabase().update("messages", v, "id=?", new String[] {id}) > 0;
+  }
+
   public synchronized boolean path(String id, String path, String state) {
     ContentValues v = new ContentValues();
     v.put("path", path);

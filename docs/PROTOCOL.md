@@ -31,7 +31,7 @@ Implemented by [`tls.c`](../windows/src/tls.c) (`wire_send`, `wire_read`), [`Wir
 - Every JSON or media record is `length:u32 big-endian` followed by exactly that many bytes. Implementations use signed 32-bit storage but reject negative lengths.
 - JSON maximum: 65,536 bytes. Media/screen record maximum: 2 MiB. Text encoding is UTF-8; binary numeric fields described below are big-endian unless stated otherwise.
 - Control request envelope: `v:1`, `type`, `name`, plus operation fields. Response is framed JSON with `ok:boolean` and usually `error:string`; some successful responses add fields.
-- Unknown protocol versions and operations are rejected. There is no negotiation beyond exact `v=1`; additive fields are ignored by tolerant JSON readers.
+- Unknown protocol versions and operations are rejected. Optional capabilities are advertised through `hello`; additive fields are ignored by tolerant JSON readers.
 
 | Type | Required/meaningful fields | Behavior |
 | --- | --- | --- |
@@ -58,7 +58,8 @@ Implemented by `network.c` (`flush`, `send_pending`, `handle`) and `LinkService`
 
 Implemented by [`files.c`](../windows/src/files.c), [`image.c`](../windows/src/image.c), `LinkService.offer`/`download`, and [`Profile.java`](../android/src/ir/altek/link/Profile.java).
 
-- Files are staged before `offer`, capped at 100 MiB, owned by UUID+recipient, and SHA-256 verified after exact-size download. A failed/retried download restarts from byte zero; no resume protocol exists.
+- `hello` advertises optional `file_stream:true`. When supported by both peers, `offer_stream` omits the initial digest; the download requests `sha256_trailer:true` and the sender appends framed JSON containing the SHA-256 hash after the exact file bytes. Both sides hash during transfer, including the stored prefix on resume. Legacy peers continue using `offer` with a precomputed hash. Access is restricted to the original UUID and authenticated recipient. Windows and Android document URIs use the original source; sources must remain available and unchanged. Older Android pickers can require an app-private staging copy. Receivers verify the completed file against SHA-256.
+- A download request may contain a 64-bit `offset`. Updated senders validate it and echo the accepted offset in the response before streaming. If the sender omits that field, a new receiver truncates its partial file and restarts at zero for compatibility. Partial files are kept in the selected receive destination for retries. Old peers can still impose their original 100 MiB limit.
 - The final receiver ACK lets the sender mark `transferred`. An offer ACK marks only `offered`, not downloaded.
 - Windows currently sends `mime:"application/octet-stream"` for every outgoing offer and does not persist incoming MIME; Android resolves and preserves MIME. This is compatible but loses metadata in Windows-originated transfers.
 - Avatars are JPEG, exactly 256x256, <=40,000 bytes, named/content-addressed by SHA-256. Discovery carries only the hash. `profile` returns `hash` and includes base64 `image` only when the request's `known` differs.

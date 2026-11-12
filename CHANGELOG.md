@@ -2,6 +2,16 @@
 
 User-facing updates for ALTEK Link. Earlier Windows-only notes are available in [windows/docs/CHANGES.md](windows/docs/CHANGES.md).
 
+## Android 0.2.0 build 11 and Windows 0.2.0 build 10 (2026-11-13)
+
+- Send large files without the previous 100 MiB limit between updated devices.
+- Choose where received files are saved on Android and Windows.
+- Start transferring files without reading the entire file first; SHA-256 integrity checking takes place during the transfer.
+- Resume interrupted downloads from the existing partial file.
+- Save received files with their original names, adding a number when a file with that name already exists.
+- Increase transfer buffers to improve throughput and show download progress.
+- Keep file transfers compatible with older releases, which may retain their own size limits.
+
 ## Android 0.2.0 build 6 and Windows 0.2.0 build 4 (2026-11-11)
 
 - Use your Android keyboard while controlling a remote screen. Type directly into Windows applications, including Persian and other Unicode text, using the language selected on your phone.

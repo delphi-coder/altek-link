@@ -8,6 +8,8 @@ Android 10 and later may require returning to ALTEK Link before copied text can 
 The Android viewer can also use the phone's keyboard to type into a remote Windows PC, including
 Unicode text. To remove a device and its local conversation, hold it in the Android device list.
 
+File transfers support large files, resumable downloads, selectable receive folders, and SHA-256 integrity checking during transfer between updated devices.
+
 The active clients are:
 
 - `android/` — Android 4.1+ (minSdk 16), targetSdk 33.

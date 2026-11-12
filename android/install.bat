@@ -6,10 +6,10 @@ if defined ALTEK_SDK set "SDK=%ALTEK_SDK%"
 set "BT=%SDK%\build-tools\33.0.1"
 set "MODE=%~1"
 if "%MODE%"=="" if exist ".local\last-build" set /p "MODE="<".local\last-build"
-if "%MODE%"=="" if exist "bin\ALTEK-Link-0.2.0-build6-debug.apk" if not exist "bin\ALTEK-Link-0.2.0-build6-release.apk" set "MODE=debug"
+if "%MODE%"=="" if exist "bin\ALTEK-Link-0.2.0-build11-debug.apk" if not exist "bin\ALTEK-Link-0.2.0-build11-release.apk" set "MODE=debug"
 if "%MODE%"=="" set "MODE=release"
 if /i not "%MODE%"=="release" if /i not "%MODE%"=="debug" goto usage
-set "APK=bin\ALTEK-Link-0.2.0-build6-%MODE%.apk"
+set "APK=bin\ALTEK-Link-0.2.0-build11-%MODE%.apk"
 echo Selected %MODE% APK: %APK%
 if not exist "%APK%" goto missing_apk
 if not exist "%BT%\lib\apksigner.jar" goto missing_signer

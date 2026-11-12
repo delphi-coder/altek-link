@@ -98,7 +98,7 @@ int valid_uuid(const char *s)
     }
     return 1;
 }
-static int hash_finish(HCRYPTHASH h, char *hex)
+int hash_finish(HCRYPTHASH h, char *hex)
 {
     unsigned char b[32];
     DWORD n = 32;
@@ -133,13 +133,14 @@ int digest(const void *data, DWORD size, char *hex)
     }
     return ok;
 }
-int digest_file(const WCHAR *path, char *hex, unsigned long *size)
+int digest_file(const WCHAR *path, char *hex, uint64_t *size)
 {
     HANDLE f;
     HCRYPTPROV p = 0;
     HCRYPTHASH h = 0;
     int ok = 0;
-    DWORD n, total = 0;
+    DWORD n;
+    uint64_t total = 0;
     unsigned char b[32768];
     f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (f == INVALID_HANDLE_VALUE)
@@ -160,10 +161,6 @@ int digest_file(const WCHAR *path, char *hex, unsigned long *size)
         if (!n)
         {
             break;
-        }
-        if (n > MAX_FILE - total)
-        {
-            goto done;
         }
         total += n;
         if (!CryptHashData(h, b, n, 0))

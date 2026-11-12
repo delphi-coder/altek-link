@@ -1,4 +1,5 @@
 #include "ui.h"
+#include <shlobj.h>
 static HWND settings_window;
 static unsigned char *profile_pixels;
 static int profile_w, profile_h;
@@ -370,17 +371,22 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
         SendMessageW(c, CB_ADDSTRING, 0, (LPARAM)L"Disabled on desktop");
         SendMessageW(c, CB_ADDSTRING, 0, (LPARAM)L"Disabled everywhere");
         SendMessageW(c, CB_SETCURSEL, app.remote_pinch_mode, 0);
+        label(h, L"Save received files", 531);
+        ui_control(h, L"EDIT", app.receive_dir, WS_BORDER | ES_AUTOHSCROLL | ES_READONLY,
+                   20, 195, 528, 115, 27);
+        ui_control(h, L"BUTTON", L"Browse", BS_PUSHBUTTON, 19, 315, 527, 70, 30);
+        ui_control(h, L"BUTTON", L"Default", BS_PUSHBUTTON, 21, 390, 527, 75, 30);
         ui_control(h, L"STATIC",
                    L"Calls use the default Windows microphone and speaker.\nUse a headset to avoid "
                    L"echo. Video changes apply to the next call.",
-                   0, 0, 20, 530, 455, 42);
+                   0, 0, 20, 570, 455, 42);
         _snprintf(version, sizeof(version) - 1, "Version %s", APP_VERSION_BUILD);
         version[sizeof(version) - 1] = 0;
         wide(version, w, countof(w));
-        ui_control(h, L"STATIC", w, SS_CENTER, 0, 195, 582, 270, 22);
-        ui_control(h, L"BUTTON", L"Open data folder", BS_PUSHBUTTON, 13, 20, 608, 160, 34);
-        ui_control(h, L"BUTTON", L"Open settings.ini", BS_PUSHBUTTON, 17, 190, 608, 145, 34);
-        ui_control(h, L"BUTTON", L"Save", BS_DEFPUSHBUTTON, 14, 345, 608, 120, 34);
+        ui_control(h, L"STATIC", w, SS_CENTER, 0, 195, 622, 270, 22);
+        ui_control(h, L"BUTTON", L"Open data folder", BS_PUSHBUTTON, 13, 20, 648, 160, 34);
+        ui_control(h, L"BUTTON", L"Open settings.ini", BS_PUSHBUTTON, 17, 190, 648, 145, 34);
+        ui_control(h, L"BUTTON", L"Save", BS_DEFPUSHBUTTON, 14, 345, 648, 120, 34);
         return 0;
     }
     if (msg == WM_COMMAND)
@@ -422,6 +428,23 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 MessageBoxW(h, L"Could not open settings.ini.", L"ALTEK Link", MB_ICONERROR);
             }
         }
+        if (id == 21) SetDlgItemTextW(h, 20, L"");
+        if (id == 19)
+        {
+            BROWSEINFOW bi;
+            LPITEMIDLIST item;
+            WCHAR folder[MAX_PATH];
+            memset(&bi, 0, sizeof(bi));
+            bi.hwndOwner = h;
+            bi.lpszTitle = L"Choose a folder for received files";
+            bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+            item = SHBrowseForFolderW(&bi);
+            if (item)
+            {
+                if (SHGetPathFromIDListW(item, folder)) SetDlgItemTextW(h, 20, folder);
+                CoTaskMemFree(item);
+            }
+        }
         if (id == 14)
         {
             WCHAR w[300];
@@ -438,6 +461,7 @@ static LRESULT CALLBACK settings_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
                 return 0;
             }
             EnterCriticalSection(&app.lock);
+            GetDlgItemTextW(h, 20, app.receive_dir, MAX_PATH);
             copy_s(app.name, 256, name);
             app.fps = fps;
             app.bitrate = bitrate * 1000;
@@ -516,5 +540,5 @@ void ui_settings(HWND parent)
     settings_window =
         CreateWindowExW(WS_EX_DLGMODALFRAME, wc.lpszClassName, L"ALTEK Link - Settings",
                         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VISIBLE, CW_USEDEFAULT,
-                        CW_USEDEFAULT, 500, 694, parent, NULL, app.instance, NULL);
+                        CW_USEDEFAULT, 500, 734, parent, NULL, app.instance, NULL);
 }

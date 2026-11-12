@@ -803,7 +803,8 @@ public final class MainActivity extends Activity {
   }
 
   private void pickFile() {
-    Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+    Intent i = new Intent(Build.VERSION.SDK_INT >= 19 ? "android.intent.action.OPEN_DOCUMENT" : Intent.ACTION_GET_CONTENT);
+    if (Build.VERSION.SDK_INT >= 19) i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | 64);
     i.setType("*/*");
     i.addCategory(Intent.CATEGORY_OPENABLE);
     try {
@@ -1047,6 +1048,18 @@ public final class MainActivity extends Activity {
 
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == 30) {
+      if (result == RESULT_OK && data != null && data.getData() != null && Build.VERSION.SDK_INT >= 21) {
+        try {
+          Uri uri = data.getData();
+          PersistedAccess.takeReadWrite(this, uri);
+          getSharedPreferences("settings", 0).edit().putString("receive_tree", uri.toString()).apply();
+          toast("Receive folder saved");
+        } catch (Exception e) { toast("Cannot use this folder"); }
+      }
+      settings();
+      return;
+    }
     if (request == 20 && result == RESULT_OK && data != null && data.getData() != null) {
       startActivityForResult(new Intent(this, CropActivity.class).setData(data.getData()), 21);
       return;
@@ -1056,6 +1069,10 @@ public final class MainActivity extends Activity {
       return;
     }
     if (request == 10 && result == RESULT_OK && data != null && selected != null) {
+      if (Build.VERSION.SDK_INT >= 19 && data.getData() != null) {
+        try { PersistedAccess.takeRead(this, data.getData()); }
+        catch (Exception ignored) {}
+      }
       LinkService s = service();
       if (s != null) s.offer(selected, data.getData(), "file");
     }
@@ -1177,6 +1194,40 @@ public final class MainActivity extends Activity {
       public void onClick(View v) { screenVideoSettings(); }
     });
     final SharedPreferences prefs = getSharedPreferences("settings", 0);
+    panel.addView(label("Received files location", 14));
+    String savedTree = prefs.getString("receive_tree", "");
+    String savedPath = prefs.getString("receive_path", "");
+    panel.addView(label(savedTree.length() > 0 ? Uri.parse(savedTree).getLastPathSegment()
+        : (savedPath.length() > 0 ? savedPath : "App storage (default)"), 12));
+    LinearLayout receiveRow = row(panel);
+    button(receiveRow, "Choose folder", new View.OnClickListener() {
+      public void onClick(View v) {
+        if (Build.VERSION.SDK_INT >= 21) {
+          try {
+            Intent i = new Intent("android.intent.action.OPEN_DOCUMENT_TREE");
+            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | 64 | 128);
+            startActivityForResult(i, 30);
+          } catch (Exception e) { toast("No folder picker available"); }
+        } else {
+          final EditText path = new EditText(MainActivity.this);
+          path.setSingleLine(true);
+          path.setText(prefs.getString("receive_path", android.os.Environment.getExternalStorageDirectory().getAbsolutePath()));
+          new AlertDialog.Builder(MainActivity.this).setTitle("Received files folder")
+              .setView(path).setPositiveButton("Save", new DialogInterface.OnClickListener() {
+                public void onClick(DialogInterface d, int n) {
+                  File f = new File(path.getText().toString().trim());
+                  if (!f.isDirectory() || !f.canWrite()) { toast("Folder is not writable"); return; }
+                  prefs.edit().putString("receive_path", f.getAbsolutePath()).apply(); settings();
+                }
+              }).setNegativeButton("Cancel", null).show();
+        }
+      }
+    });
+    button(receiveRow, "Use default", new View.OnClickListener() {
+      public void onClick(View v) {
+        prefs.edit().remove("receive_tree").remove("receive_path").apply(); settings();
+      }
+    });
     final AvatarView ownAvatar = new AvatarView(this);
     ownAvatar.bind("self", prefs.getString("name", Build.MODEL));
     panel.addView(ownAvatar, new LinearLayout.LayoutParams(dp(80), dp(80)));

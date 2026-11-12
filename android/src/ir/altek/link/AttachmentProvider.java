@@ -20,7 +20,9 @@ public final class AttachmentProvider extends ContentProvider {
     try {
       Store.Msg m = store.message(id);
       if (m == null || m.path == null || m.path.isEmpty()) throw new FileNotFoundException();
+      if (m.path.startsWith("content://")) return m;
       File f = new File(m.path);
+      if (android.os.Build.VERSION.SDK_INT < 21 && f.isFile()) return m;
       if (!f.getCanonicalPath()
               .startsWith(getContext().getFilesDir().getCanonicalPath() + File.separator)
           || !f.isFile()) throw new FileNotFoundException();
@@ -34,8 +36,10 @@ public final class AttachmentProvider extends ContentProvider {
 
   public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
     if (!"r".equals(mode)) throw new FileNotFoundException();
-    return ParcelFileDescriptor.open(
-        new File(message(uri).path), ParcelFileDescriptor.MODE_READ_ONLY);
+    Store.Msg m = message(uri);
+    if (m.path.startsWith("content://"))
+      return getContext().getContentResolver().openFileDescriptor(Uri.parse(m.path), "r");
+    return ParcelFileDescriptor.open(new File(m.path), ParcelFileDescriptor.MODE_READ_ONLY);
   }
 
   public String getType(Uri uri) {
@@ -60,7 +64,7 @@ public final class AttachmentProvider extends ContentProvider {
         values[i] =
             "_display_name".equals(columns[i])
                 ? j.getString("filename")
-                : ("_size".equals(columns[i]) ? Long.valueOf(new File(m.path).length()) : null);
+                : ("_size".equals(columns[i]) ? Long.valueOf(j.optLong("size", 0)) : null);
       c.addRow(values);
       return c;
     } catch (Exception e) {

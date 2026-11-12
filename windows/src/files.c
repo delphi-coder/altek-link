@@ -7,21 +7,20 @@ struct file_job
 static unsigned __stdcall stage_file(void *arg)
 {
     struct file_job *job = (struct file_job *)arg;
-    char id[40], hash[65], name[768];
-    WCHAR path[MAX_PATH], leaf[80];
+    char id[40], name[768];
     struct message *m;
     const WCHAR *base;
-    unsigned long size;
+    uint64_t size;
+    WIN32_FILE_ATTRIBUTE_DATA attrs;
     uid(id);
-    _snwprintf(leaf, 80, L"sent\\%S", id);
-    path_join(path, app.dir, leaf);
-    if (!CopyFileW(job->path, path, TRUE) || !digest_file(path, hash, &size))
+    if (!GetFileAttributesExW(job->path, GetFileExInfoStandard, &attrs) ||
+        (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
     {
-        DeleteFileW(path);
-        notice("Could not stage file (limit 100 MB)");
+        notice("Could not read the source file");
         free(job);
         return 0;
     }
+    size = ((uint64_t)attrs.nFileSizeHigh << 32) | attrs.nFileSizeLow;
     base = wcsrchr(job->path, L'\\');
     base = base ? base + 1 : job->path;
     utf8(base, name, sizeof(name));
@@ -29,16 +28,15 @@ static unsigned __stdcall stage_file(void *arg)
     m = message_add(id, job->peer, "file", name, 1);
     if (m)
     {
-        copy_s(m->hash, 65, hash);
+        m->hash[0] = 0;
         wcsncpy(m->filename, base, 179);
-        wcscpy(m->path, path);
+        wcsncpy(m->path, job->path, MAX_PATH - 1);
         m->size = size;
         message_save(m);
     }
     LeaveCriticalSection(&app.lock);
     if (!m)
     {
-        DeleteFileW(path);
         notice("Message storage full");
     }
     free(job);
@@ -69,72 +67,152 @@ static unsigned __stdcall download_job(void *arg)
     struct json j;
     WCHAR path[MAX_PATH], temp[MAX_PATH], leaf[250];
     HANDLE f = INVALID_HANDLE_VALUE;
-    unsigned long left;
-    DWORD written;
-    unsigned char b[32768];
+    uint64_t left, offset = 0, acknowledged = 0;
+    LARGE_INTEGER position;
+    ULARGE_INTEGER available;
+    WCHAR destination[MAX_PATH];
+    DWORD written, got;
+    HCRYPTPROV hp = 0;
+    HCRYPTHASH hh = 0;
+    unsigned char b[262144];
+    DWORD last_update = 0;
     path[0] = temp[0] = 0;
     if (!peer_copy(m->peer, &p) || p.blocked)
     {
         goto done;
     }
-    t = tls_connect(p.ip, p.id);
-    if (!t)
-    {
-        goto done;
-    }
-    _snprintf(fields, sizeof(fields), "\"id\":\"%s\"", m->id);
-    req = envelope("download", fields);
-    if (!req || !wire_json(t, req))
-    {
-        goto done;
-    }
-    response = (char *)wire_read(t, &n, MAX_JSON);
-    if (!response || !json_parse(&j, response) || !json_bool(&j, "ok") || m->size > MAX_FILE)
-    {
-        goto done;
-    }
-    _snwprintf(leaf, 250, L"received\\%S_%s", m->id, m->filename);
+    _snwprintf(leaf, 250, L"%S_%s", m->id, m->filename);
     leaf[249] = 0;
-    path_join(path, app.dir, leaf);
+    EnterCriticalSection(&app.lock);
+    if (m->receive_dir[0])
+        wcsncpy(destination, m->receive_dir, MAX_PATH - 1);
+    else if (app.receive_dir[0])
+        wcsncpy(destination, app.receive_dir, MAX_PATH - 1);
+    else
+        path_join(destination, app.dir, L"received");
+    destination[MAX_PATH - 1] = 0;
+    if (!m->receive_dir[0])
+    {
+        wcsncpy(m->receive_dir, destination, MAX_PATH - 1);
+        message_save(m);
+    }
+    LeaveCriticalSection(&app.lock);
+    if (wcslen(destination) + wcslen(leaf) + 7 >= MAX_PATH)
+    {
+        notice("Receive folder path is too long");
+        goto done;
+    }
+    path_join(path, destination, leaf);
     _snwprintf(temp, MAX_PATH, L"%s.part", path);
     temp[MAX_PATH - 1] = 0;
-    f = CreateFileW(temp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, 0, NULL);
-    if (f == INVALID_HANDLE_VALUE)
+    f = CreateFileW(temp, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE || !GetFileSizeEx(f, &position) || position.QuadPart < 0)
+        goto done;
+    offset = (uint64_t)position.QuadPart;
+    if (offset > m->size) offset = 0;
+    if (GetDiskFreeSpaceExW(destination, &available, NULL, NULL) &&
+        available.QuadPart < m->size - offset)
     {
+        notice("Not enough free space in the receive folder");
         goto done;
     }
-    left = m->size;
+    if (!CryptAcquireContextW(&hp, NULL, NULL, PROV_RSA_AES, CRYPT_VERIFYCONTEXT) ||
+        !CryptCreateHash(hp, CALG_SHA_256, 0, 0, &hh)) goto done;
+    left = offset;
+    position.QuadPart = 0;
+    if (!SetFilePointerEx(f, position, NULL, FILE_BEGIN)) goto done;
+    while (left)
+    {
+        DWORD want = left > sizeof(b) ? sizeof(b) : (DWORD)left;
+        if (!ReadFile(f, b, want, &got, NULL) || got != want || !CryptHashData(hh, b, got, 0)) goto done;
+        left -= got;
+    }
+    t = tls_connect(p.ip, p.id);
+    if (!t) goto done;
+    { DWORD timeout = 4UL * 60UL * 60UL * 1000UL; setsockopt(t->socket, SOL_SOCKET, SO_RCVTIMEO, (const char *)&timeout, sizeof(timeout)); }
+    _snprintf(fields, sizeof(fields), "\"id\":\"%s\",\"offset\":%I64u,\"sha256_trailer\":%s", m->id, offset, m->hash[0] ? "false" : "true");
+    req = envelope("download", fields);
+    if (!req || !wire_json(t, req)) goto done;
+    response = (char *)wire_read(t, &n, MAX_JSON);
+    if (!response || !json_parse(&j, response) || !json_bool(&j, "ok")) goto done;
+    if (!json_u64(&j, "offset", &acknowledged)) acknowledged = 0;
+    if (acknowledged != offset)
+    {
+        if (acknowledged != 0) goto done;
+        offset = 0;
+        CryptDestroyHash(hh); hh = 0;
+        if (!CryptCreateHash(hp, CALG_SHA_256, 0, 0, &hh)) goto done;
+        if (GetDiskFreeSpaceExW(destination, &available, NULL, NULL) && available.QuadPart < m->size)
+        {
+            notice("Not enough free space in the receive folder");
+            goto done;
+        }
+    }
+    position.QuadPart = offset;
+    if (!SetFilePointerEx(f, position, NULL, FILE_BEGIN) || !SetEndOfFile(f)) goto done;
+    left = m->size - offset;
     while (left && app.running)
     {
-        DWORD want = left > sizeof(b) ? sizeof(b) : left;
-        if (!tls_read(t, b, want) || !WriteFile(f, b, want, &written, NULL) || written != want)
+        DWORD want = left > sizeof(b) ? sizeof(b) : (DWORD)left;
+        if (!tls_read(t, b, want) || !CryptHashData(hh, b, want, 0) || !WriteFile(f, b, want, &written, NULL) || written != want)
         {
             goto done;
         }
         left -= want;
-        EnterCriticalSection(&app.lock);
-        _snprintf(m->state, 40, "receiving %lu%%",
-                  (m->size - left) * 100 / (m->size ? m->size : 1));
-        LeaveCriticalSection(&app.lock);
-        changed();
+        if (!last_update || GetTickCount() - last_update >= 1000 || !left)
+        {
+            EnterCriticalSection(&app.lock);
+            _snprintf(m->state, 40, "receiving %lu%%",
+                      (unsigned long)((double)(m->size - left) * 100.0 / (double)(m->size ? m->size : 1)));
+            LeaveCriticalSection(&app.lock);
+            changed();
+            last_update = GetTickCount();
+        }
     }
     CloseHandle(f);
     f = INVALID_HANDLE_VALUE;
-    if (left || !digest_file(temp, hash, NULL) || strcmp(hash, m->hash) ||
-        !MoveFileExW(temp, path, MOVEFILE_REPLACE_EXISTING))
+    if (left || !hash_finish(hh, hash)) goto done;
+    if (!m->hash[0])
     {
+        free(response);
+        response = (char *)wire_read(t, &n, MAX_JSON);
+        if (!response || !json_parse(&j, response) || !json_get(&j, "hash", fields, sizeof(fields)) || !valid_hex(fields, 64)) goto done;
+    }
+    else copy_s(fields, sizeof(fields), m->hash);
+    if (strcmp(hash, fields))
+    {
+        DeleteFileW(temp);
+        notice("File checksum mismatch; retry from beginning");
         goto done;
+    }
+    {
+        WCHAR base[180], ext[180], candidate[250];
+        WCHAR *dot;
+        unsigned int index;
+        wcsncpy(base, m->filename, 179); base[179] = 0;
+        ext[0] = 0;
+        dot = wcsrchr(base, L'.');
+        if (dot && dot != base) { wcscpy(ext, dot); *dot = 0; }
+        for (index = 0; index < 100000; index++)
+        {
+            if (index) _snwprintf(candidate, 250, L"%s (%u)%s", base, index, ext);
+            else _snwprintf(candidate, 250, L"%s%s", base, ext);
+            candidate[249] = 0;
+            if (wcslen(destination) + wcslen(candidate) + 2 >= MAX_PATH) goto done;
+            path_join(path, destination, candidate);
+            if (MoveFileExW(temp, path, 0)) break;
+            if (GetLastError() != ERROR_ALREADY_EXISTS && GetLastError() != ERROR_FILE_EXISTS) goto done;
+        }
+        if (index == 100000) goto done;
     }
     ok = 1;
     wire_json(t, "{\"ok\":true}");
 done:
+    if (hh) CryptDestroyHash(hh);
+    if (hp) CryptReleaseContext(hp, 0);
     if (f != INVALID_HANDLE_VALUE)
     {
         CloseHandle(f);
-    }
-    if (!ok && temp[0])
-    {
-        DeleteFileW(temp);
     }
     tls_close(t);
     free(req);
@@ -148,7 +226,7 @@ done:
     }
     message_save(m);
     LeaveCriticalSection(&app.lock);
-    log_event("FILE_RX", "ok=%d bytes=%lu", ok, m->size);
+    log_event("FILE_RX", "ok=%d bytes=%I64u", ok, m->size);
     if (!ok)
     {
         notice("File download failed; press Retry download in the message");
@@ -350,7 +428,7 @@ int profile_set(const WCHAR *source)
 {
     WCHAR temp[MAX_PATH], path[MAX_PATH];
     char hash[65];
-    unsigned long size;
+    uint64_t size;
     int ok = 0;
     path_join(temp, app.dir, L"avatar-new.jpg");
     if (image_avatar(source, temp) && digest_file(temp, hash, &size) && size <= 40000)

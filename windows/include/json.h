@@ -1,6 +1,7 @@
 #ifndef ALTEK_JSON_H
 #define ALTEK_JSON_H
 #include <stddef.h>
+#include <stdint.h>
 struct json_token
 {
     int start, end, next, type;
@@ -13,6 +14,7 @@ struct json
 };
 int json_parse(struct json *j, const char *s);
 int json_get(struct json *j, const char *key, char *out, size_t cap);
+int json_u64(struct json *j, const char *key, uint64_t *out);
 long json_num(struct json *j, const char *key, long fallback);
 int json_bool(struct json *j, const char *key);
 char *json_quote(const char *text);
