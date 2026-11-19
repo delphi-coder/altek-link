@@ -47,7 +47,7 @@
 #error Wrong compiler environment: x86 was requested.
 #endif
 #include "build_number.h"
-#define APP_VERSION "0.2.0"
+#define APP_VERSION "0.9.0"
 #define ALTEK_TEXT_INNER(value) #value
 #define ALTEK_TEXT(value) ALTEK_TEXT_INNER(value)
 #define APP_VERSION_BUILD APP_VERSION " (build " ALTEK_TEXT(APP_BUILD) ")"

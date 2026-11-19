@@ -24,6 +24,16 @@ public final class LinkService extends Service {
   public Identity identity;
   public volatile boolean ready, cameraArmed;
   public volatile String lastCallFailure = "";
+  public volatile WebBridge webBridge;
+  public synchronized String startWebBridge(android.net.Uri tree, java.io.File folder) throws Exception {
+    stopWebBridge();
+    WebBridge bridge = new WebBridge(this, tree, folder);
+    try { bridge.start(30000, true); String address = bridge.address(); webBridge = bridge; return address; }
+    catch (Exception e) { bridge.stop(); throw e; }
+  }
+  public synchronized void stopWebBridge() {
+    if (webBridge != null) { webBridge.stop(); webBridge = null; }
+  }
 
   // "screen" calls: owned here, not by an activity, so sharing survives the activity being
   // backgrounded (pressing Home, a remote tap opening another app, ...) - the whole point of
@@ -190,7 +200,7 @@ public final class LinkService extends Service {
       }
       if (!live) return;
       DebugLog.init(this, identity.id);
-      DebugLog.event("SERVICE", "Starting API=" + Build.VERSION.SDK_INT + " version=0.2.0");
+      DebugLog.event("SERVICE", "Starting API=" + Build.VERSION.SDK_INT + " version=0.9.0");
       server = (SSLServerSocket) identity.tls.getServerSocketFactory().createServerSocket();
       server.setReuseAddress(true);
       server.bind(new InetSocketAddress(Wire.PORT));
@@ -1005,7 +1015,7 @@ public final class LinkService extends Service {
   /** Starts sharing this device's screen for an already-answered "screen" call. Call once, from
    *  whichever activity answered it; the session then lives here, independent of that activity.
    *  projection is the already-approved MediaProjection (API 21+, no root), or null to use the
-   *  root-based fallback (screenrecord on API 19-20, periodic screenshots on API 16-18). */
+   *  root-based fallback (periodic screenshots on API 16-20, screenrecord on API 21+). */
   public synchronized void beginScreenShare(final Call c, MediaProjection projection) {
     if (call != c || c.socket == null || screenEngine != null) return;
     int[] real = ScreenCapture.realSize(this);
@@ -1225,6 +1235,7 @@ public final class LinkService extends Service {
   }
 
   public void onDestroy() {
+    stopWebBridge();
     live = false;
     stopRinging();
     stopForeground(true);

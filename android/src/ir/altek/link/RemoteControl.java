@@ -1,5 +1,6 @@
 package ir.altek.link;
 
+import java.io.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -22,7 +23,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class RemoteControl {
   private static final int MAX_PENDING = 2;
-
   private final int width, height;
   private final ExecutorService exec = Executors.newSingleThreadExecutor();
   private final AtomicInteger pending = new AtomicInteger();
@@ -30,6 +30,9 @@ public final class RemoteControl {
       1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<Runnable>(128));
   private boolean shiftDown, ctrlDown, capsLock;
   private volatile boolean stopped;
+  private final Object legacyInputLock = new Object();
+  private Process legacyInputProcess;
+  private OutputStream legacyInput;
 
   public RemoteControl(int width, int height) {
     this.width = Math.max(1, width);
@@ -52,12 +55,21 @@ public final class RemoteControl {
         action == 1 /* GLOBAL_ACTION_BACK */
             ? 4
             : action == 2 /* GLOBAL_ACTION_HOME */ ? 3 : 187 /* GLOBAL_ACTION_RECENTS: APP_SWITCH */;
+    if (directLegacyInput()) {
+      submitDirect("K " + keycode);
+      return;
+    }
     submit("input keyevent " + keycode);
   }
 
   public void tap(float nx, float ny) {
     float x = px(nx), y = py(ny);
     if (ControlAccessibilityService.isEnabled() && ControlAccessibilityService.tap(x, y)) return;
+    if (directLegacyInput()) {
+      submitDirectRequired("D " + Math.round(x) + " " + Math.round(y));
+      submitDirectRequired("U " + Math.round(x) + " " + Math.round(y));
+      return;
+    }
     submit("input tap " + Math.round(x) + " " + Math.round(y));
   }
 
@@ -67,6 +79,11 @@ public final class RemoteControl {
     float x1 = px(nx1), y1 = py(ny1), x2 = px(nx2), y2 = py(ny2);
     if (ControlAccessibilityService.isEnabled()
         && ControlAccessibilityService.swipe(x1, y1, x2, y2, durationMs)) return;
+    if (directLegacyInput()) {
+      submitDirectRequired("S " + Math.round(x1) + " " + Math.round(y1) + " "
+          + Math.round(x2) + " " + Math.round(y2) + " " + durationMs);
+      return;
+    }
     submit(
         "input swipe "
             + Math.round(x1)
@@ -102,15 +119,24 @@ public final class RemoteControl {
     downNx = nx;
     downNy = ny;
     downTime = System.nanoTime() / 1000000L;
+    if (directLegacyInput()) submitDirectRequired("D " + Math.round(px(nx)) + " " + Math.round(py(ny)));
   }
 
   /** Raw mouse move: no-op on the root fallback (input swipe is discrete);
    *  when the accessibility service is on, we could in theory stream a
    *  GestureDescription, but for v1 tap/swipe already covers the workflow. */
-  public void mouseMove(float nx, float ny) {}
+  public void mouseMove(float nx, float ny) {
+    if (directLegacyInput() && downNx >= 0)
+      submitDirect("M " + Math.round(px(nx)) + " " + Math.round(py(ny)));
+  }
 
   /** Raw mouse up: decide tap vs swipe from how far the finger travelled. */
   public void mouseUp(float nx, float ny) {
+    if (directLegacyInput() && downNx >= 0) {
+      submitDirectRequired("U " + Math.round(px(nx)) + " " + Math.round(py(ny)));
+      downNx = -1;
+      return;
+    }
     if (downNx < 0) {
       tap(nx, ny);
       return;
@@ -148,6 +174,10 @@ public final class RemoteControl {
   public void longPress(float nx, float ny) {
     float x = px(nx), y = py(ny);
     if (ControlAccessibilityService.isEnabled() && ControlAccessibilityService.press(x, y)) return;
+    if (directLegacyInput()) {
+      submitDirectRequired("L " + Math.round(x) + " " + Math.round(y));
+      return;
+    }
     submit("input swipe " + Math.round(x) + " " + Math.round(y) + " " + Math.round(x) + " " + Math.round(y) + " 600");
   }
 
@@ -171,7 +201,10 @@ public final class RemoteControl {
           try {
             if (ControlAccessibilityService.editKey(vk, shift, control, caps)) return;
             // Root keyevent is an atomic key press; it cannot preserve Ctrl combinations.
-            if (!control) RootShell.run("input keyevent " + code, 4000);
+            if (!control) {
+              if (directLegacyInput()) writeLegacyInput("K " + code);
+              else runInput("input keyevent " + code);
+            }
           } catch (Exception e) {
             DebugLog.error("REMOTE_KEY", e);
           }
@@ -248,6 +281,89 @@ public final class RemoteControl {
     return v < lo ? lo : v > hi ? hi : v;
   }
 
+  private void runInput(String command) throws Exception {
+    RootShell.run(command, 4000);
+  }
+
+  private static boolean directLegacyInput() {
+    return (android.os.Build.VERSION.SDK_INT == 19
+        && "HUAWEI Y520-U22".equals(android.os.Build.MODEL))
+        || (android.os.Build.VERSION.SDK_INT == 17
+        && "HUAWEI Y600-U20".equals(android.os.Build.MODEL))
+        || samsungP1Input();
+  }
+
+  private static boolean samsungP1Input() {
+    return android.os.Build.VERSION.SDK_INT == 19
+        && "SCH-I800".equals(android.os.Build.MODEL);
+  }
+
+  /** Keep one SuperSU shell for the whole control session; spawning one per event is very slow. */
+  private void writeLegacyInput(String command) throws Exception {
+    synchronized (legacyInputLock) {
+      if (stopped) return;
+      try {
+        ensureLegacyInputShell();
+        legacyInput.write((command + "\n").getBytes("UTF-8"));
+        legacyInput.flush();
+      } catch (IOException first) {
+        closeLegacyInputShell();
+        ensureLegacyInputShell();
+        legacyInput.write((command + "\n").getBytes("UTF-8"));
+        legacyInput.flush();
+      }
+    }
+  }
+
+  private void ensureLegacyInputShell() throws IOException {
+    if (legacyInputProcess != null) {
+      try {
+        legacyInputProcess.exitValue();
+        closeLegacyInputShell();
+      } catch (IllegalThreadStateException running) {
+        return;
+      }
+    }
+    final String helper = "CLASSPATH=/data/local/tmp/altek-root-screen.jar exec "
+        + "/system/bin/app_process /system/bin ir.altek.link.RootInputHelper";
+    // CyanogenMod's SCH-I800 su does not implement SuperSU's -cn context arguments. It already
+    // grants a persistent uid-0 shell, which can inject input directly. Keep Huawei's proven
+    // shell-context invocation unchanged.
+    final Process p = samsungP1Input()
+        ? RootShell.startInteractive(helper)
+        : RootShell.startWithArguments("-cn", "u:r:shell:s0", "-c", helper);
+    legacyInputProcess = p;
+    legacyInput = p.getOutputStream();
+    Thread drain = new Thread(new Runnable() {
+      public void run() {
+        try {
+          InputStream in = p.getInputStream();
+          byte[] bytes = new byte[512];
+          while (in.read(bytes) != -1) {}
+        } catch (IOException ignored) {
+        }
+      }
+    }, "remote-input-root-output");
+    drain.setDaemon(true);
+    drain.start();
+  }
+
+  private void closeLegacyInputShell() {
+    if (legacyInput != null) {
+      try {
+        legacyInput.write("exit\n".getBytes());
+        legacyInput.flush();
+        legacyInput.close();
+      } catch (Exception ignored) {
+      }
+    }
+    if (legacyInputProcess != null) {
+      try { legacyInputProcess.destroy(); } catch (Exception ignored) {}
+    }
+    legacyInput = null;
+    legacyInputProcess = null;
+  }
+
   private void submit(final String shellCommand) {
     if (stopped || pending.get() > MAX_PENDING) return;
     pending.incrementAndGet();
@@ -256,7 +372,7 @@ public final class RemoteControl {
           new Runnable() {
             public void run() {
               try {
-                RootShell.run(shellCommand, 4000);
+                runInput(shellCommand);
               } catch (Exception e) {
                 DebugLog.error("REMOTE_INPUT", e);
               } finally {
@@ -269,9 +385,52 @@ public final class RemoteControl {
     }
   }
 
+  private void submitDirect(final String event) {
+    if (stopped || pending.get() > MAX_PENDING) return;
+    pending.incrementAndGet();
+    try {
+      exec.execute(new Runnable() {
+        public void run() {
+          try {
+            writeLegacyInput(event);
+          } catch (Exception e) {
+            DebugLog.error("REMOTE_INPUT", e);
+          } finally {
+            pending.decrementAndGet();
+          }
+        }
+      });
+    } catch (RejectedExecutionException e) {
+      pending.decrementAndGet();
+    }
+  }
+
+  private void submitDirectRequired(final String event) {
+    if (stopped) return;
+    pending.incrementAndGet();
+    try {
+      exec.execute(new Runnable() {
+        public void run() {
+          try {
+            writeLegacyInput(event);
+          } catch (Exception e) {
+            DebugLog.error("REMOTE_INPUT", e);
+          } finally {
+            pending.decrementAndGet();
+          }
+        }
+      });
+    } catch (RejectedExecutionException e) {
+      pending.decrementAndGet();
+    }
+  }
+
   public void stop() {
     stopped = true;
     exec.shutdownNow();
     keys.shutdownNow();
+    synchronized (legacyInputLock) {
+      closeLegacyInputShell();
+    }
   }
 }

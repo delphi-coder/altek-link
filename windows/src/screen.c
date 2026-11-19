@@ -1,4 +1,5 @@
 #include "link.h"
+#include <wincodec.h>
 #define SCREEN_H264_DUMP 0
 /* Remote desktop over the Android 0.1.6+ "screen" call. The call uses its own
  * Screen-media sub-protocol on the same media socket, different from the audio/video
@@ -911,6 +912,51 @@ int screen_send_text(const WCHAR *text, int length)
     return screen_send(p, bytes + 2);
 }
 
+/* Decode independently compressed screen frames sent by older Android devices. */
+static int screen_decode_jpeg(unsigned char *data, int len, unsigned char **pixels, int *w, int *h)
+{
+    IWICImagingFactory *factory = NULL;
+    IWICStream *stream = NULL;
+    IWICBitmapDecoder *decoder = NULL;
+    IWICBitmapFrameDecode *frame = NULL;
+    IWICFormatConverter *converter = NULL;
+    unsigned char *out = NULL;
+    UINT width = 0, height = 0;
+    HRESULT init, hr;
+    int ok = 0;
+    *pixels = NULL;
+    init = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    if (FAILED(init) && init != RPC_E_CHANGED_MODE) return 0;
+    hr = CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
+                          &IID_IWICImagingFactory, (void **)&factory);
+    if (SUCCEEDED(hr)) hr = IWICImagingFactory_CreateStream(factory, &stream);
+    if (SUCCEEDED(hr)) hr = IWICStream_InitializeFromMemory(stream, data, (DWORD)len);
+    if (SUCCEEDED(hr)) hr = IWICImagingFactory_CreateDecoderFromStream(factory, (IStream *)stream,
+                                        NULL, WICDecodeMetadataCacheOnLoad, &decoder);
+    if (SUCCEEDED(hr)) hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
+    if (SUCCEEDED(hr)) hr = IWICBitmapFrameDecode_GetSize(frame, &width, &height);
+    if (SUCCEEDED(hr) && width && height && width <= 1920 && height <= 1920)
+    {
+        hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
+        if (SUCCEEDED(hr)) hr = IWICFormatConverter_Initialize(converter, (IWICBitmapSource *)frame,
+            &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, NULL, 0, WICBitmapPaletteTypeCustom);
+        if (SUCCEEDED(hr)) out = (unsigned char *)malloc(width * height * 4);
+        if (out && SUCCEEDED(IWICFormatConverter_CopyPixels(converter, NULL, width * 4,
+                                                           width * height * 4, out)))
+        {
+            *pixels = out; *w = (int)width; *h = (int)height; out = NULL; ok = 1;
+        }
+    }
+    free(out);
+    if (converter) IWICFormatConverter_Release(converter);
+    if (frame) IWICBitmapFrameDecode_Release(frame);
+    if (decoder) IWICBitmapDecoder_Release(decoder);
+    if (stream) IWICStream_Release(stream);
+    if (factory) IWICImagingFactory_Release(factory);
+    if (SUCCEEDED(init)) CoUninitialize();
+    return ok;
+}
+
 void screen_run(struct call *c)
 {
     HANDLE cap = NULL, ping = NULL, cursor = NULL;
@@ -918,6 +964,7 @@ void screen_run(struct call *c)
     int timeout = 15000, len, bw, bh;
     ULONGLONG last = GetTickCount64();
     int frames = 0;
+    int screen_format = -1;
     unsigned char *b, *rgb;
 
     if (c->outgoing) InterlockedExchange(&remote_text_capable, 0);
@@ -970,21 +1017,26 @@ void screen_run(struct call *c)
         case 0: /* keepalive */
             break;
         case 1: /* format: feed the SPS/PPS container to the decoder too */
-            if (c->outgoing && dec && len >= 10)
+            if (c->outgoing && len >= 10 && (b[1] == 0 || b[1] == 1))
             {
                 int cw2, ch2;
                 unsigned char *rgb2;
+                screen_format = b[1];
                 /* OpenH264 needs the parameter sets fed before the access units
                  * decode, exactly as media.c feeds the video "format" packet. */
-                codec_decode(dec, b + 10, len - 10, &rgb2, &cw2, &ch2);
+                if (screen_format && dec && len > 10)
+                    codec_decode(dec, b + 10, len - 10, &rgb2, &cw2, &ch2);
             }
             break;
         case 2: /* frame */
-            if (c->outgoing && dec && len > 10)
+            if (c->outgoing && len > 10 && screen_format >= 0)
             {
-                if (codec_decode(dec, b + 10, len - 10, &rgb, &bw, &bh))
+                int decoded = screen_format ? (dec && codec_decode(dec, b + 10, len - 10, &rgb, &bw, &bh))
+                                            : screen_decode_jpeg(b + 10, len - 10, &rgb, &bw, &bh);
+                if (decoded)
                 {
                     video_present(rgb, bw, bh, 0);
+                    if (!screen_format) free(rgb);
                     frames++;
                 }
             }

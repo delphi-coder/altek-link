@@ -2,6 +2,37 @@
 
 User-facing updates for ALTEK Link. Earlier Windows-only notes are available in [windows/docs/CHANGES.md](windows/docs/CHANGES.md).
 
+## Android and Windows 0.9.0 build 1 (2026-11-20)
+
+This release brings the Android and Windows clients close to the first stable release, with substantial improvements to transfers, calls, screen sharing, remote control, compatibility, and everyday usability.
+
+### Highlights
+
+- **More complete remote access.** Screen sharing now has bounded queues, keyframe recovery, full-screen Windows presentation, remote keyboard support, text clipboard sharing, improved mouse handling, and lower-latency control on supported rooted Android devices.
+- **Stronger file transfers.** Large transfers are more reliable, receive folders can be selected, and interrupted transfers can resume when both peers support it.
+- **Better calling experience.** Audio/video call windows, self-view, camera switching, incoming-call controls, taskbar behavior, and old-device compatibility have been refined.
+- **Local web access.** The built-in local receiver provides a browser-friendly way to reach supported ALTEK Link functions on the LAN.
+
+### Android
+
+- Added configurable screen-capture size, frame rate, bitrate, and keyframe interval.
+- Improved unattended, owner-authorized root screen access on legacy Android devices.
+- Added direct H.264 root capture and persistent low-latency input for selected Huawei/legacy devices, while preserving fallbacks for other hardware.
+- Added remote keyboard and special-key handling, Android IME text forwarding, clipboard controls, and improved zoom/pan interaction.
+- Improved receive-folder access, file resumption, profile handling, call UI, and camera/video behavior.
+
+### Windows
+
+- Added real full-screen remote presentation with a corner exit control and special-key redirection only while full screen is active.
+- Added INI-backed screen encoder controls, quality rate control, screen-content tuning, configurable FPS/bitrate/keyframes, and disabled raw H.264 dumping by default.
+- Improved call-window repainting, taskbar behavior, settings layout, version visibility, icons, remote input, clipboard support, and file transfer reliability.
+- Added x86 and x64 release builds for Windows 7 and later.
+
+### Known limitations
+
+- Windows executables are not Authenticode-signed and may trigger SmartScreen warnings.
+- Some legacy Android hardware has device-specific codec limits. In particular, Huawei Y520-U22 decodes 720p fully but loses vertical detail from 1080p streams; automatic receiver-side resolution negotiation is planned.
+
 ## Android 0.2.0 build 11 and Windows 0.2.0 build 10 (2026-11-13)
 
 - Send large files without the previous 100 MiB limit between updated devices.

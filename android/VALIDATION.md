@@ -1,4 +1,15 @@
-# Validation — ALTEK Link 0.1.16
+# Validation — ALTEK Link
+
+## Current owner acceptance — 2026-11-15
+
+- Current source identity is Android 0.9.0 build 1 (`versionCode` 44).
+- The owner reports that almost all normal cross-platform behavior is working in practical testing, including large-file transfer, calls, screen sharing, remote control, keyboard input, and recent queue/keyframe improvements.
+- This acceptance is not a complete device/API/OEM matrix. Keep the historical reproducible build evidence below until a new formal artifact-validation pass replaces it.
+- Build 24 was signed, installed over existing data on a Huawei Y520-U22, and the full existing JVM suite passed. Owner testing confirmed direct H.264 root capture and low-latency persistent root input; 1080p zoom quality remains limited by the device decoder.
+- The 0.9.0 build 1 release APK was signed and verified with APK signature schemes v1, v2, and v3 on 2026-11-20; the full existing JVM suite passed.
+- Standalone Baseline decode probes returned full 640x360 and 1280x720 output. A 1920x1080 input returned format 1920x540, `height-ratio=2`, stride 1920, slice-height 540, and 1,555,200 output bytes. This is the evidence for the planned Y520-only 720p receive cap.
+
+## Historical artifact validation — 0.1.16
 
 Completed on 2026-10-30:
 
@@ -19,7 +30,7 @@ compatibility during validation. The private keystore is not part of the reposit
 first public release, decide whether this certificate is the permanent release identity and keep
 its private key securely backed up outside source control.
 
-Still pending: installation and warning behavior on current Android devices, actual settings and
+At the time of that artifact validation, still pending were installation and warning behavior on current Android devices, actual settings and
 camera enumeration, custom camera/encoder combinations, runtime codec fallback, ringtone/OEM
 behavior, and end-to-end interoperability with both current Windows builds. Minimum API support is
 not a guarantee that every legacy camera or codec works.

@@ -24,13 +24,16 @@ OUTDIR = bin/$(ARCH)
 STRIPFLAGS = -s
 endif
 SOURCES = $(wildcard src/*.c)
-OBJECTS = $(patsubst src/%.c,$(OBJROOT)/%.o,$(SOURCES))
+OBJECTS = $(patsubst src/%.c,$(OBJROOT)/%.o,$(SOURCES)) $(OBJROOT)/webbridge_qr.o
 CFLAGS = $(ARCHFLAGS) -DALTEK_EXPECT_$(if $(filter x86,$(ARCH)),X86,X64) $(MODEFLAGS) -std=gnu90 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation
 LDLIBS = -lws2_32 -lsecur32 -lcrypt32 -ladvapi32 -liphlpapi -lole32 -loleaut32 -luuid -luser32 -lusp10 -lgdi32 -lcomdlg32 -lcomctl32 -lshell32 -lwinmm -lmsimg32 -lwindowscodecs -lmf -lmfplat -lmfuuid
 all: $(OUTDIR)/AltekLink.exe
 $(OBJROOT)/%.o: src/%.c include/link.h include/build_number.h include/ui.h include/json.h $(CONFIG_DEP)
 	@if not exist "$(subst /,\,$(OBJROOT))" mkdir "$(subst /,\,$(OBJROOT))"
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+$(OBJROOT)/webbridge_qr.o: src/webbridge_qr.cpp third_party/qrcodegen/qrcodegen.c third_party/qrcodegen/qrcodegen.h include/build_number.h
+	@if not exist "$(subst /,\,$(OBJROOT))" mkdir "$(subst /,\,$(OBJROOT))"
+	$(CC) $(CPPFLAGS) $(ARCHFLAGS) $(MODEFLAGS) -x c++ -std=gnu++98 -fno-exceptions -fno-rtti -c $< -o $@
 $(OBJROOT)/app.res: assets/app.rc assets/app.ico assets/app.manifest include/build_number.h
 	@if not exist "$(subst /,\,$(OBJROOT))" mkdir "$(subst /,\,$(OBJROOT))"
 	$(WINDRES) -Iassets -i assets/app.rc -o $@ -O coff $(if $(filter x86,$(ARCH)),--target=pe-i386,--target=pe-x86-64)

@@ -150,6 +150,33 @@ public final class RootShell {
     return p;
   }
 
+  /** Starts su with explicit arguments and leaves its standard streams attached to the caller. */
+  public static Process startWithArguments(String... arguments) throws IOException {
+    String candidate = working != null ? working : "su";
+    try {
+      return spawnWithArguments(candidate, arguments);
+    } catch (IOException first) {
+      if (working != null) throw first;
+      for (String c : CANDIDATES) {
+        if (c.equals(candidate)) continue;
+        try {
+          Process p = spawnWithArguments(c, arguments);
+          working = c;
+          return p;
+        } catch (IOException ignored) {
+        }
+      }
+      throw first;
+    }
+  }
+
+  private static Process spawnWithArguments(String candidate, String[] arguments) throws IOException {
+    String[] command = new String[arguments.length + 1];
+    command[0] = candidate;
+    System.arraycopy(arguments, 0, command, 1, arguments.length);
+    return new ProcessBuilder(command).redirectErrorStream(true).start();
+  }
+
   private static String[] orderedCandidates() {
     if (working == null) return CANDIDATES;
     String[] r = new String[CANDIDATES.length];

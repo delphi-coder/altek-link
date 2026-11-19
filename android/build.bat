@@ -11,7 +11,7 @@ if defined ALTEK_SDK set "SDK=%ALTEK_SDK%"
 set "BT=%SDK%\build-tools\33.0.1"
 set "PLATFORM=%SDK%\platforms\android-34\android.jar"
 set "MODE_SOURCE=modes\%MODE%\ir\altek\link\DebugLog.java"
-set "OUTPUT=bin\ALTEK-Link-0.2.0-build11-%MODE%.apk"
+set "OUTPUT=bin\ALTEK-Link-0.9.0-build1-%MODE%.apk"
 set "JAVAC_DEBUG=-g:none"
 set "D8_MODE=--release"
 
@@ -69,10 +69,16 @@ if not exist "%ALTEK_KEYSTORE%" (
 call :clean_generated
 mkdir build
 if errorlevel 1 goto fail
+mkdir build\helper
+if errorlevel 1 goto fail
+mkdir build\apk-assets
+if errorlevel 1 goto fail
+xcopy /e /i /q /y assets build\apk-assets >nul
+if errorlevel 1 goto fail
 mkdir gen
 if errorlevel 1 goto fail
 mkdir bin 2>nul
-"%BT%\aapt.exe" package -f -m -J gen -M AndroidManifest.xml -S res -I "%PLATFORM%"
+"%BT%\aapt.exe" package -f -m -J gen -M AndroidManifest.xml -S res -A assets -I "%PLATFORM%"
 if errorlevel 1 goto fail
 if /i "%MODE%"=="debug" (
  >"gen\ir\altek\link\DebugUdpConfig.java" echo package ir.altek.link;
@@ -82,9 +88,13 @@ if /i "%MODE%"=="debug" (
 )
 javac %JAVAC_DEBUG% -encoding UTF-8 -Xlint:-options -source 7 -target 7 -bootclasspath "%PLATFORM%" -cp ".;%PLATFORM%" -d build src\ir\altek\link\*.java "%MODE_SOURCE%" gen\ir\altek\link\*.java
 if errorlevel 1 goto fail
+javac -g:none -encoding UTF-8 -Xlint:-options -source 7 -target 7 -bootclasspath "%PLATFORM%" -cp ".;%PLATFORM%" -d build\helper helper\ir\altek\link\RootScreenHelper.java helper\ir\altek\link\RootInputHelper.java
+if errorlevel 1 goto fail
+java -cp "%BT%\lib\d8.jar" com.android.tools.r8.D8 build\helper\ir\altek\link\RootScreenHelper.class build\helper\ir\altek\link\RootInputHelper.class --release --lib "%PLATFORM%" --min-api 16 --output build\apk-assets\root-screen-helper.jar
+if errorlevel 1 goto fail
 java -cp "%BT%\lib\d8.jar" com.android.tools.r8.D8 build\ir\altek\link\*.class %D8_MODE% --lib "%PLATFORM%" --min-api 16 --output build
 if errorlevel 1 goto fail
-"%BT%\aapt.exe" package -f -M AndroidManifest.xml -S res -I "%PLATFORM%" -F app-unsigned.apk
+"%BT%\aapt.exe" package -f -M AndroidManifest.xml -S res -A build\apk-assets -I "%PLATFORM%" -F app-unsigned.apk
 if errorlevel 1 goto fail
 jar uf app-unsigned.apk -C build classes.dex
 if errorlevel 1 goto fail
@@ -101,7 +111,7 @@ if not exist ".local" mkdir ".local"
 >".local\last-build" echo %MODE%
 echo.
 echo SUCCESS: %CD%\%OUTPUT%
-echo ALTEK Link 0.2.0 %MODE% build completed.
+echo ALTEK Link 0.9.0 build 1 %MODE% completed.
 exit /b 0
 
 :clean

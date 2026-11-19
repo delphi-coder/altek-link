@@ -798,8 +798,8 @@ public final class RemoteControlActivity extends Activity implements TextureView
               && Math.hypot(e.getX() - lastTapRawX, e.getY() - lastTapRawY) < dp(24)) {
             // double-tap: toggle zoom around the tap point (fit <-> 2x)
             zoom = zoom > 1.5f ? 1f : 2.0f;
-            View t = zoomTarget();
-            float tw = t.getWidth(), th = t.getHeight();
+            float[] content = displayedContentSize();
+            float tw = content[0], th = content[1];
             if (tw > 0 && th > 0) {
               panX = -(pt[0] - 0.5f) * zoom * tw;
               panY = -(pt[1] - 0.5f) * zoom * th;
@@ -830,10 +830,21 @@ public final class RemoteControlActivity extends Activity implements TextureView
 
   private void applyZoom() {
     View t = zoomTarget();
-    t.setScaleX(zoom);
-    t.setScaleY(zoom);
-    t.setTranslationX(panX);
-    t.setTranslationY(panY);
+    if (h264Mode && y520LegacyRenderer()) {
+      float[] content = displayedContentSize();
+      float tw = surface.getWidth(), th = surface.getHeight();
+      if (tw <= 0 || th <= 0 || content[0] <= 0 || content[1] <= 0) return;
+      surface.setTransform(new Matrix());
+      surface.setScaleX(zoom * content[0] / tw);
+      surface.setScaleY(zoom * content[1] / th);
+      surface.setTranslationX(panX);
+      surface.setTranslationY(panY);
+    } else {
+      t.setScaleX(zoom);
+      t.setScaleY(zoom);
+      t.setTranslationX(panX);
+      t.setTranslationY(panY);
+    }
   }
 
   private void resetTransforms() {
@@ -841,6 +852,7 @@ public final class RemoteControlActivity extends Activity implements TextureView
     surface.setScaleY(1f);
     surface.setTranslationX(0f);
     surface.setTranslationY(0f);
+    surface.setTransform(new Matrix());
     image.setScaleX(1f);
     image.setScaleY(1f);
     image.setTranslationX(0f);
@@ -848,11 +860,11 @@ public final class RemoteControlActivity extends Activity implements TextureView
   }
 
   private void clampPan() {
-    View t = zoomTarget();
     int sw = stage.getWidth(), sh = stage.getHeight();
-    if (sw <= 0 || sh <= 0 || t == null) return;
-    float maxX = Math.max(0f, (zoom * t.getWidth() - sw) / 2f);
-    float maxY = Math.max(0f, (zoom * t.getHeight() - sh) / 2f);
+    float[] content = displayedContentSize();
+    if (sw <= 0 || sh <= 0 || content[0] <= 0 || content[1] <= 0) return;
+    float maxX = Math.max(0f, (zoom * content[0] - sw) / 2f);
+    float maxY = Math.max(0f, (zoom * content[1] - sh) / 2f);
     if (panX > maxX) panX = maxX;
     if (panX < -maxX) panX = -maxX;
     if (panY > maxY) panY = maxY;
@@ -860,14 +872,35 @@ public final class RemoteControlActivity extends Activity implements TextureView
   }
 
   private float[] stageToRemote(float px, float py) {
-    View t = zoomTarget();
-    float tw = t.getWidth(), th = t.getHeight();
+    float[] content = displayedContentSize();
+    float tw = content[0], th = content[1];
     int sw = stage.getWidth(), sh = stage.getHeight();
     if (tw <= 0 || th <= 0 || sw <= 0 || sh <= 0) return null;
     return new float[] {
       clamp01(0.5f + (px - sw / 2f - panX) / (zoom * tw)),
       clamp01(0.5f + (py - sh / 2f - panY) / (zoom * th))
     };
+  }
+
+  /** Size of the unzoomed remote image after fit/fill, in stage pixels. */
+  private float[] displayedContentSize() {
+    if (!h264Mode || !y520LegacyRenderer()) {
+      View target = zoomTarget();
+      return target == null
+          ? new float[] {0, 0}
+          : new float[] {target.getWidth(), target.getHeight()};
+    }
+    int sw = stage.getWidth(), sh = stage.getHeight();
+    if (sw <= 0 || sh <= 0 || lastW <= 0 || lastH <= 0) return new float[] {0, 0};
+    float scale = fitMode
+        ? Math.min(sw / (float) lastW, sh / (float) lastH)
+        : Math.max(sw / (float) lastW, sh / (float) lastH);
+    return new float[] {lastW * scale, lastH * scale};
+  }
+
+  /** Keep renderer workarounds for this proven-bad KitKat/Mali path off every other device. */
+  private static boolean y520LegacyRenderer() {
+    return Build.VERSION.SDK_INT == 19 && "HUAWEI Y520-U22".equals(Build.MODEL);
   }
 
   private static float clamp(float v, float lo, float hi) {
@@ -904,12 +937,25 @@ public final class RemoteControlActivity extends Activity implements TextureView
             ? Math.min(sw / (float) cw, sh / (float) ch)
             : Math.max(sw / (float) cw, sh / (float) ch);
     int fw = Math.max(1, Math.round(cw * scale)), fh = Math.max(1, Math.round(ch * scale));
+    if (v == surface && y520LegacyRenderer()) {
+      fw = cw;
+      fh = ch;
+    }
     FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) v.getLayoutParams();
     if (lp.width != fw || lp.height != fh) {
       lp.width = fw;
       lp.height = fh;
       lp.gravity = Gravity.CENTER;
       v.setLayoutParams(lp);
+    }
+    if (v == surface && y520LegacyRenderer()) {
+      final View target = v;
+      target.post(new Runnable() {
+        public void run() {
+          clampPan();
+          applyZoom();
+        }
+      });
     }
   }
 

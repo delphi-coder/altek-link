@@ -254,6 +254,16 @@ static void draw_icon(struct canvas *c, int icon)
         poly_line(c, p, 3, 1, 1.0, 255);
     }
     break;
+    case ICON_WEB:
+    {
+        static const double left[10] = {10.0, 3.2, 8.0, 7.0, 7.4, 12.0, 8.0, 17.0, 10.0, 20.8};
+        static const double right[10] = {14.0, 3.2, 16.0, 7.0, 16.6, 12.0, 16.0, 17.0, 14.0, 20.8};
+        arc(c, 12, 12, 9.2, 0, 360, 1.7, 255);
+        poly_line(c, left, 5, 0, 1.6, 255);
+        poly_line(c, right, 5, 0, 1.6, 255);
+        seg(c, 3.1, 12, 20.9, 12, 1.6, 255);
+        break;
+    }
     case ICON_SETTINGS:
         circle(c, 12, 12, 7.4, 255);
         for (i = 0; i < 8; i++)

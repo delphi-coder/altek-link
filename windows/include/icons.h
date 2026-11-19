@@ -20,6 +20,7 @@
 #define ICON_RECENTS 17
 #define ICON_FIT 18
 #define ICON_FULL 19
+#define ICON_WEB 20
 /* Fills mask (size * size bytes) with anti-aliased coverage 0..255. */
 void icon_render(int icon, int size, int slash, unsigned char *mask);
 #endif

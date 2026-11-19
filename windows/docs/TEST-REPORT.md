@@ -1,6 +1,13 @@
-# Verification report — Windows 0.1.7
+# Verification report — Windows
 
-## Current-source follow-up — 2026-10-30
+## Current owner acceptance — 2026-11-12
+
+- Current source identity is Windows 0.9.0 build 1.
+- The owner reports that almost all normal application behavior is working in practical testing, including Windows-to-Windows and cross-platform operation, calls, screen sharing/remote control, recent input and frame-queue fixes, and large-file transfer.
+- Release x86 and x64 binaries for 0.9.0 build 1 were built successfully in the scratch tree on 2026-11-20. This is practical build evidence, not a complete Windows 7/10/11, scaling, firewall, media-hardware, and long-duration matrix.
+- The dated sections below are retained as historical reproducible evidence; their old version numbers and pending lists do not describe the current release by themselves.
+
+## Historical current-source follow-up — 2026-10-30
 
 - Current artifact identity is version 0.1.7, build 7. `include/build_number.h` is the build-number
   source; the value is shown in the main title, Settings, and the `START` log.

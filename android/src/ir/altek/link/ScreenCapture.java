@@ -9,11 +9,13 @@ import android.media.MediaCodec;
 import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
+import android.media.MediaExtractor;
 import android.media.projection.MediaProjection;
 import android.os.Build;
 import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.Surface;
+import android.view.Display;
 import android.view.WindowManager;
 import java.io.*;
 import java.nio.Buffer;
@@ -30,13 +32,13 @@ import java.util.List;
  *       same way {@link VideoCapture} already encodes the camera - no root needed, only a one-time
  *       system "Start recording or casting?" prompt per session (that prompt is requested by the
  *       activity, not here; this class is handed an already-approved {@link MediaProjection}).
- *   <li>API 19-20, or API 21+ when the person declines the prompt: falls back to streaming real
+ *   <li>API 21+ when the person declines the prompt: falls back to streaming real
  *       H.264 from the `screenrecord` shell tool (root required), parsed from its raw Annex-B
  *       elementary stream into access units compatible with {@link VideoDisplay}.
  *       `screenrecord` stops on its own after a time limit, so a session longer than that is
  *       continued by starting a fresh process; the decoder just gets a new format() call.
- *   <li>API 16-18: `screenrecord` does not exist yet, so this instead loops on `screencap -p`
- *       (which has existed since very early Android), decodes the PNG, scales it down, and sends it
+ *   <li>API 16-20: loops on `screencap -p` for compatibility with older screenrecord tools,
+ *       decodes the PNG, scales it down, and sends it
  *       as a JPEG "frame" at a modest rate (not a real video stream).
  * </ul>
  *
@@ -58,6 +60,7 @@ public final class ScreenCapture {
   }
 
   private final Sink sink;
+  private final Context context;
   private volatile boolean stop;
   private volatile Process process;
   private final Thread thread;
@@ -68,11 +71,13 @@ public final class ScreenCapture {
   private MediaProjection projection;
   private ScreenOptions options;
 
-  /** Root fallback: screenrecord (API 19-20) or periodic screenshots (API 16-18). */
+  /** Root fallback: screenrecord (API 21+) or periodic screenshots (API 16-20). */
   public ScreenCapture(final Context context, final Sink sink) {
     this.sink = sink;
+    this.context = context.getApplicationContext();
     this.options = ScreenOptions.load(context);
-    final boolean stream = Build.VERSION.SDK_INT >= 19;
+    // KitKat's screenrecord writes MP4 and does not support raw H.264 stdout.
+    final boolean stream = Build.VERSION.SDK_INT >= 21;
     thread =
         new Thread(
             new Runnable() {
@@ -83,7 +88,18 @@ public final class ScreenCapture {
                   if (!root.granted) throw new IOException("Root access not available: " + root.detail);
                   int[] size = targetSize(context, stream ? options.maxSide : Math.min(options.maxSide, 720));
                   if (stream) streamLoop(size[0], size[1]);
-                  else snapshotLoop(size[0], size[1]);
+                  else if (directRootCaptureDevice()) {
+                    int[] directSize = samsungP1Device()
+                        ? samsungP1TargetSize(context) : targetSize(context, options.maxSide);
+                    try {
+                      directRootLoop(directSize[0], directSize[1]);
+                    } catch (Exception e) {
+                      if (stop) return;
+                      DebugLog.error("SCREEN_ROOT_DIRECT", e);
+                      sink.status("Direct H.264 unavailable, using screenshots...");
+                      snapshotLoop(size[0], size[1]);
+                    }
+                  } else snapshotLoop(size[0], size[1]);
                 } catch (Exception e) {
                   if (!stop) sink.error(e);
                 }
@@ -96,6 +112,7 @@ public final class ScreenCapture {
   /** Preferred path on API 21+: no root, uses an already-approved MediaProjection. */
   public ScreenCapture(final Context context, final MediaProjection projection, final Sink sink) {
     this.sink = sink;
+    this.context = context.getApplicationContext();
     this.options = ScreenOptions.load(context);
     this.projection = projection;
     thread =
@@ -317,7 +334,177 @@ public final class ScreenCapture {
     return ((v + 8) / 16) * 16;
   }
 
+  // --------------------------------------------------------- API 19 Y520: direct root Surface / H.264
+
+  private boolean directRootCaptureDevice() {
+    return (Build.VERSION.SDK_INT == 19 && "HUAWEI Y520-U22".equals(Build.MODEL))
+        || (Build.VERSION.SDK_INT == 17 && "HUAWEI Y600-U20".equals(Build.MODEL))
+        || samsungP1Device();
+  }
+
+  private static boolean samsungP1Device() {
+    return Build.VERSION.SDK_INT == 19 && "SCH-I800".equals(Build.MODEL);
+  }
+
+  /** Encoder-safe, macroblock-aligned sizes for the SCH-I800's 800x600 AVC limit. */
+  private static int[] samsungP1TargetSize(Context context) {
+    int[] real = realSize(context);
+    return real[0] <= real[1] ? new int[] {352, 592} : new int[] {800, 464};
+  }
+
+  private void installRootHelper() throws Exception {
+    File jar = new File(context.getFilesDir(), "root-screen-helper.jar");
+    InputStream input = context.getAssets().open("root-screen-helper.jar");
+    FileOutputStream output = new FileOutputStream(jar, false);
+    try {
+      byte[] buffer = new byte[8192];
+      int count;
+      while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+      output.getFD().sync();
+    } finally {
+      try { output.close(); } finally { input.close(); }
+    }
+    File script = new File(context.getFilesDir(), "root-screen-helper.sh");
+    output = new FileOutputStream(script, false);
+    try {
+      output.write(("#!/system/bin/sh\n"
+          + "export CLASSPATH=/data/local/tmp/altek-root-screen.jar\n"
+          // KitKat's app_process does not support the newer --nice-name option.
+          + "exec /system/bin/app_process /system/bin "
+          + "ir.altek.link.RootScreenHelper \"$@\"\n").getBytes("UTF-8"));
+      output.getFD().sync();
+    } finally {
+      output.close();
+    }
+    String jarPath = jar.getAbsolutePath(), scriptPath = script.getAbsolutePath();
+    if (jarPath.indexOf('\'') >= 0 || scriptPath.indexOf('\'') >= 0)
+      throw new IOException("Invalid helper path");
+    RootShell.run("cp '" + jarPath + "' /data/local/tmp/altek-root-screen.jar && cp '"
+        + scriptPath + "' /data/local/tmp/altek-root-screen.sh && chmod 644 "
+        + "/data/local/tmp/altek-root-screen.jar && chmod 755 /data/local/tmp/altek-root-screen.sh", 5000);
+  }
+
+  private void directRootLoop(int width, int height) throws Exception {
+    installRootHelper();
+    Display display = ((WindowManager) context.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
+    int rotation = display.getRotation();
+    int[] current = realSize(context);
+    int sourceWidth = (rotation == 1 || rotation == 3) ? current[1] : current[0];
+    int sourceHeight = (rotation == 1 || rotation == 3) ? current[0] : current[1];
+    String arguments = width + " " + height + " "
+        + (samsungP1Device() ? Math.min(options.bitrate, 2000000) : options.bitrate) + " "
+        + (samsungP1Device() ? Math.min(options.fps, 10) : options.fps) + " "
+        + options.keySeconds + " " + sourceWidth + " " + sourceHeight + " " + rotation;
+    // CyanogenMod's su on the SCH-I800 has no `su shell -c` form. Keep the proven Huawei
+    // invocation byte-for-byte equivalent, and give only the Samsung branch its own codec/command.
+    String command = samsungP1Device()
+        ? "/system/bin/sh /data/local/tmp/altek-root-screen.sh " + arguments
+            + " OMX.SEC.AVC.Encoder"
+        : "su shell -c 'runcon u:r:shell:s0 /system/bin/sh "
+            + "/data/local/tmp/altek-root-screen.sh " + arguments + "'";
+    sink.status("Starting direct H.264 screen capture...");
+    process = RootShell.startInteractive(command);
+    DataInputStream input = new DataInputStream(new BufferedInputStream(process.getInputStream(), 65536));
+    if (input.readInt() != 0x414C5331) throw new IOException("Root screen helper did not start");
+    while (!stop) {
+      int type = input.readUnsignedByte();
+      if (type == 1) {
+        int outWidth = input.readInt(), outHeight = input.readInt(), length = input.readInt();
+        if (length <= 0 || length > 1048576) throw new IOException("Root screen format size");
+        byte[] config = new byte[length];
+        input.readFully(config);
+        sink.format(true, outWidth, outHeight, config);
+      } else if (type == 2) {
+        boolean key = input.readUnsignedByte() != 0;
+        long pts = input.readLong();
+        int length = input.readInt();
+        if (length <= 0 || length > 4194304) throw new IOException("Root screen frame size");
+        byte[] bytes = new byte[length];
+        input.readFully(bytes);
+        sink.frame(key, pts, bytes);
+      } else {
+        throw new IOException("Root screen record type");
+      }
+    }
+  }
+
   // ---------------------------------------------------------------- API 19+: screenrecord / H.264
+
+  /** KitKat screenrecord only writes finalized MP4: send short recordings as H.264 segments. */
+  private void legacyMp4Loop(Context context, int w, int h) throws Exception {
+    File recording = new File(context.getCacheDir(), "screen-segment.mp4");
+    if (!recording.exists() && !recording.createNewFile()) throw new IOException("Cannot create screen cache");
+    String path = recording.getAbsolutePath();
+    if (path.indexOf('\'') >= 0) throw new IOException("Invalid screen cache path");
+    sink.status("Starting H.264 screen capture (short segments)...");
+    long started = System.nanoTime();
+    try {
+      while (!stop) {
+        new FileOutputStream(recording, false).close();
+        RootShell.run("screenrecord --size " + w + "x" + h + " --bit-rate "
+            + Math.min(options.bitrate, 2000000) + " --time-limit 2 '" + path + "'", 12000);
+        if (stop) break;
+        FileInputStream input = new FileInputStream(recording);
+        MediaExtractor extractor = new MediaExtractor();
+        try {
+          extractor.setDataSource(input.getFD());
+          int track = -1;
+          MediaFormat format = null;
+          for (int i = 0; i < extractor.getTrackCount(); i++) {
+            MediaFormat f = extractor.getTrackFormat(i);
+            if ("video/avc".equalsIgnoreCase(f.getString(MediaFormat.KEY_MIME))) {
+              track = i;
+              format = f;
+              break;
+            }
+          }
+          if (track < 0 || format == null) throw new IOException("No H.264 track in screen recording");
+          byte[] sps = csd(format, "csd-0"), pps = csd(format, "csd-1");
+          if (sps.length == 0 || pps.length == 0) throw new IOException("Missing H.264 configuration");
+          DebugLog.event("SCREEN_LEGACY_H264", "track " + w + "x" + h + " sps=" + sps.length + " pps=" + pps.length);
+          byte[] config = new byte[sps.length + pps.length];
+          System.arraycopy(sps, 0, config, 0, sps.length);
+          System.arraycopy(pps, 0, config, sps.length, pps.length);
+          int fw = format.containsKey(MediaFormat.KEY_WIDTH) ? format.getInteger(MediaFormat.KEY_WIDTH) : w;
+          int fh = format.containsKey(MediaFormat.KEY_HEIGHT) ? format.getInteger(MediaFormat.KEY_HEIGHT) : h;
+          extractor.selectTrack(track);
+          ByteBuffer sample = ByteBuffer.allocate(2 * 1024 * 1024);
+          boolean sentFormat = false;
+          long base = (System.nanoTime() - started) / 1000;
+          long firstPts = -1, playbackStart = SystemClock.elapsedRealtime();
+          while (!stop) {
+            ((Buffer) sample).clear();
+            int length = extractor.readSampleData(sample, 0);
+            if (length < 0) break;
+            if (length == 0) { extractor.advance(); continue; }
+            long samplePts = Math.max(0, extractor.getSampleTime());
+            if (firstPts < 0) firstPts = samplePts;
+            long delay = Math.min(2000, Math.max(0, (samplePts - firstPts) / 1000))
+                - (SystemClock.elapsedRealtime() - playbackStart);
+            if (delay > 0) Thread.sleep(delay);
+            if (stop) break;
+            if (!sentFormat) {
+              sink.format(true, fw, fh, config);
+              sentFormat = true;
+            }
+            byte[] bytes = new byte[length];
+            ((Buffer) sample).position(0);
+            sample.get(bytes);
+            boolean key = (extractor.getSampleFlags() & MediaExtractor.SAMPLE_FLAG_SYNC) != 0;
+            if (!sentFormat || key) DebugLog.event("SCREEN_LEGACY_H264", "frame bytes=" + length + " key=" + key);
+            sink.frame(key, base + samplePts - firstPts, bytes);
+            if (!extractor.advance()) break;
+          }
+          if (!sentFormat && !stop) throw new IOException("No H.264 frames in screen recording");
+        } finally {
+          extractor.release();
+          input.close();
+        }
+      }
+    } finally {
+      recording.delete();
+    }
+  }
 
   private void streamLoop(int w, int h) throws Exception {
     sink.status("Starting screen stream...");
@@ -426,7 +613,7 @@ public final class ScreenCapture {
     return r;
   }
 
-  // -------------------------------------------------------------- API 16-18: screencap snapshots
+  // -------------------------------------------------------------- API 16-20: screencap snapshots
 
   private void snapshotLoop(int w, int h) throws Exception {
     sink.status("Starting screen capture...");

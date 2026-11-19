@@ -35,7 +35,9 @@ if not exist "%ALTEK_OBJ%" mkdir "%ALTEK_OBJ%"
 if not exist "%ALTEK_OUT%" mkdir "%ALTEK_OUT%"
 rc /nologo /I assets /fo "%ALTEK_OBJ%\app.res" assets\app.rc
 if errorlevel 1 exit /b 1
-cl /nologo /TC /W3 %ALTEK_CFLAGS% /Fd"%ALTEK_OBJ%\vc100.pdb" /MT /D_CRT_SECURE_NO_WARNINGS /D%ALTEK_EXPECT% %ALTEK_CONFIG_INCLUDE% /Iinclude /Ithird_party\openh264 /Fo"%ALTEK_OBJ%\\" src\*.c /Fe"%ALTEK_OUT%\AltekLink.exe" /link /OPT:REF /SUBSYSTEM:WINDOWS,6.01 "%ALTEK_OBJ%\app.res" ws2_32.lib secur32.lib crypt32.lib advapi32.lib iphlpapi.lib ole32.lib oleaut32.lib uuid.lib user32.lib usp10.lib gdi32.lib comdlg32.lib comctl32.lib shell32.lib winmm.lib msimg32.lib windowscodecs.lib mf.lib mfplat.lib mfuuid.lib
+cl /nologo /TP /EHsc /MT /W3 %ALTEK_CFLAGS% /D_CRT_SECURE_NO_WARNINGS /D%ALTEK_EXPECT% %ALTEK_CONFIG_INCLUDE% /Iinclude /Fo"%ALTEK_OBJ%\webbridge_qr.obj" /c src\webbridge_qr.cpp
+if errorlevel 1 exit /b 1
+cl /nologo /TC /W3 %ALTEK_CFLAGS% /Fd"%ALTEK_OBJ%\vc100.pdb" /MT /D_CRT_SECURE_NO_WARNINGS /D%ALTEK_EXPECT% %ALTEK_CONFIG_INCLUDE% /Iinclude /Ithird_party\openh264 /Fo"%ALTEK_OBJ%\\" src\*.c /Fe"%ALTEK_OUT%\AltekLink.exe" /link "%ALTEK_OBJ%\webbridge_qr.obj" /OPT:REF /SUBSYSTEM:WINDOWS,6.01 "%ALTEK_OBJ%\app.res" ws2_32.lib secur32.lib crypt32.lib advapi32.lib iphlpapi.lib ole32.lib oleaut32.lib uuid.lib user32.lib usp10.lib gdi32.lib comdlg32.lib comctl32.lib shell32.lib winmm.lib msimg32.lib windowscodecs.lib mf.lib mfplat.lib mfuuid.lib
 if errorlevel 1 (
  echo BUILD FAILED. Close a running AltekLink.exe and retry if the output is locked.
  exit /b 1

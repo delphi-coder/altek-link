@@ -727,15 +727,84 @@ public final class MainActivity extends Activity {
     new AlertDialog.Builder(this)
         .setTitle("ALTEK Link")
         .setItems(
-            new String[] {"Settings / Profile", "Add IP", "Message all"},
+            new String[] {"Settings / Profile", "Add IP", "Message all", "Web sharing"},
             new DialogInterface.OnClickListener() {
               public void onClick(DialogInterface d, int n) {
                 if (n == 0) settings();
                 else if (n == 1) addIP();
-                else broadcastText();
+                else if (n == 2) broadcastText();
+                else webSharing();
               }
             })
         .show();
+  }
+
+  private void webSharing() {
+    LinkService service = service();
+    if (service == null) { toast("Start ALTEK Link first"); return; }
+    if (service.webBridge != null) { showWebSharing(); return; }
+    if (Build.VERSION.SDK_INT >= 21) {
+      try {
+        Intent i = new Intent("android.intent.action.OPEN_DOCUMENT_TREE");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | 64 | 128);
+        startActivityForResult(i, 31);
+      } catch (Exception e) { toast("No folder picker available"); }
+    } else {
+      final EditText path = new EditText(this);
+      path.setSingleLine(true);
+      path.setText(android.os.Environment.getExternalStorageDirectory().getAbsolutePath());
+      new AlertDialog.Builder(this).setTitle("Choose folder to share").setView(path)
+          .setPositiveButton("Start", new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int which) {
+              try {
+                File f = new File(path.getText().toString()).getCanonicalFile();
+                if (!f.isDirectory() || !f.canRead() || !f.canWrite()) throw new IOException("Folder unavailable");
+                service().startWebBridge(null, f); showWebSharing();
+              } catch (Exception e) { toast("Cannot start web sharing: " + e.getMessage()); }
+            }
+          }).setNegativeButton("Cancel", null).show();
+    }
+  }
+  private void showWebSharing() {
+    final LinkService service = service();
+    if (service == null || service.webBridge == null) { toast("Web sharing is not running"); return; }
+    try {
+      String address = service.webBridge.address();
+      QrCode qr = QrCode.encodeText(address, QrCode.Ecc.MEDIUM);
+      int quiet=4, scale=6, side=(qr.size+quiet*2)*scale;
+      android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(side,side,android.graphics.Bitmap.Config.ARGB_8888);
+      for (int y=0;y<side;y++) for (int x=0;x<side;x++) bitmap.setPixel(x,y,qr.getModule(x/scale-quiet,y/scale-quiet)?Color.BLACK:Color.WHITE);
+      LinearLayout panel=new LinearLayout(this); panel.setPadding(dp(16),dp(8),dp(16),dp(8)); panel.setOrientation(LinearLayout.VERTICAL);
+      panel.addView(label("Scan with the other device",16));
+      LinearLayout settingsButtons = row(panel);
+      button(settingsButtons, "File display settings", new View.OnClickListener() {
+        public void onClick(View v) { showWebFileSettings(service.webBridge); }
+      });
+      ImageView image=new ImageView(this); image.setImageBitmap(bitmap); image.setAdjustViewBounds(true); image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+      panel.addView(image,new LinearLayout.LayoutParams(-1,dp(230)));
+      TextView url=label(service.webBridge.shortAddress(),16); url.setTextIsSelectable(true); panel.addView(url);
+      panel.addView(label("Access code: " + service.webBridge.accessCode(),20));
+      panel.addView(label("Anyone with the QR or access code can access the selected folder. HTTP is not encrypted.",12));
+      final EditText text=new EditText(this); text.setHint("Shared text"); text.setText(service.webBridge.getText()); panel.addView(text);
+      LinearLayout buttons=row(panel);
+      button(buttons,"Save text",new View.OnClickListener(){public void onClick(View v){service.webBridge.setText(text.getText().toString());toast("Text shared");}});
+      button(buttons,"Refresh text",new View.OnClickListener(){public void onClick(View v){text.setText(service.webBridge.getText());}});
+      ScrollView scroll = new ScrollView(this);
+      scroll.addView(panel);
+      new AlertDialog.Builder(this).setTitle("Web sharing active").setView(scroll)
+          .setPositiveButton("Close",null).setNegativeButton("Stop sharing",new DialogInterface.OnClickListener(){public void onClick(DialogInterface d,int n){service.stopWebBridge();toast("Web sharing stopped");}}).show();
+    } catch(Exception e) { toast("Cannot display address: " + e.getMessage()); }
+  }
+
+  private void showWebFileSettings(final WebBridge bridge) {
+    String[] labels = {"Images (JPG, PNG)", "Video (MP4)", "HTML"};
+    boolean[] checked = {bridge.showInBrowser(0), bridge.showInBrowser(1), bridge.showInBrowser(2)};
+    new AlertDialog.Builder(this).setTitle("Open in browser (otherwise download)")
+        .setMultiChoiceItems(labels, checked, new DialogInterface.OnMultiChoiceClickListener() {
+          public void onClick(DialogInterface dialog, int which, boolean enabled) {
+            bridge.setShowInBrowser(which, enabled);
+          }
+        }).setPositiveButton("Done", null).show();
   }
 
   private void addIP() {
@@ -1048,6 +1117,13 @@ public final class MainActivity extends Activity {
 
   protected void onActivityResult(int request, int result, Intent data) {
     super.onActivityResult(request, result, data);
+    if (request == 31) {
+      if (result == RESULT_OK && data != null && data.getData() != null && Build.VERSION.SDK_INT >= 21) {
+        try { Uri uri=data.getData(); PersistedAccess.takeReadWrite(this,uri); LinkService service=service(); if(service==null)throw new IOException("Service unavailable"); service.startWebBridge(uri,null); showWebSharing(); }
+        catch(Exception e) { toast("Cannot start web sharing: " + e.getMessage()); }
+      }
+      return;
+    }
     if (request == 30) {
       if (result == RESULT_OK && data != null && data.getData() != null && Build.VERSION.SDK_INT >= 21) {
         try {

@@ -47,6 +47,9 @@ HWND ui_control(HWND parent, const WCHAR *cls, const WCHAR *text, DWORD style, i
         case ID_SETTINGS:
             tip = L"Settings";
             break;
+        case ID_WEB_START:
+            tip = L"Web sharing";
+            break;
         case ID_MUTE:
             tip = L"Mute microphone";
             break;
@@ -454,6 +457,8 @@ static int button_icon(int id)
         return ICON_FULL;
     case ID_SETTINGS:
         return ICON_SETTINGS;
+    case ID_WEB_START:
+        return ICON_WEB;
     }
     return ICON_DISC;
 }
@@ -526,6 +531,11 @@ void ui_draw_button(DRAWITEMSTRUCT *d)
         ui_icon(dc, ICON_DISC, cx, cy, 38, ui_theme()->press_disc, 0);
     }
     ui_icon(dc, icon, cx, cy, 26, ui_theme()->accent, 0);
+    if (id == ID_WEB_START && web_sharing_is_active())
+    {
+        ui_icon(dc, ICON_DISC, r.right - 8, r.bottom - 8, 11, UI_BAR, 0);
+        ui_icon(dc, ICON_DISC, r.right - 8, r.bottom - 8, 7, RGB(20, 143, 172), 0);
+    }
 }
 static void layout(HWND hwnd)
 {
@@ -535,6 +545,7 @@ static void layout(HWND hwnd)
     cw = r.right - left;
     MoveWindow(contacts, 0, 58, left, r.bottom - 58, TRUE);
     MoveWindow(GetDlgItem(hwnd, ID_SETTINGS), left - 50, 8, 40, 40, TRUE);
+    MoveWindow(GetDlgItem(hwnd, ID_WEB_START), left - 98, 8, 40, 40, TRUE);
     MoveWindow(GetDlgItem(hwnd, ID_HEADER_PHOTO), left + 10, 8, 44, 44, TRUE);
     MoveWindow(header, left + 64, 12, cw - 266, 36, TRUE);
     MoveWindow(GetDlgItem(hwnd, ID_AUDIO), r.right - 192, 10, 42, 40, TRUE);
@@ -583,7 +594,8 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                               LBS_OWNERDRAWFIXED | LBS_NOTIFY | LBS_HASSTRINGS | WS_VSCROLL,
                               ID_CONTACTS, 0, 0, 260, 400);
         SendMessageW(contacts, LB_SETITEMHEIGHT, 0, 78);
-        ui_control(hwnd, L"STATIC", L"ALTEK Link", SS_LEFT, 200, 18, 17, 180, 30);
+        ui_control(hwnd, L"STATIC", L"ALTEK Link", SS_LEFT, 200, 18, 17, 140, 30);
+        ui_control(hwnd, L"BUTTON", L"", BS_OWNERDRAW, ID_WEB_START, 0, 0, 40, 40);
         ui_control(hwnd, L"BUTTON", L"", BS_OWNERDRAW, ID_SETTINGS, 0, 0, 40, 40);
         ui_control(hwnd, L"BUTTON", L"", BS_OWNERDRAW, ID_HEADER_PHOTO, 0, 0, 44, 44);
         header = ui_control(hwnd, L"STATIC", L"ALTEK Link", SS_NOTIFY, ID_AVATAR, 0, 0, 300, 40);
@@ -847,6 +859,13 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case ID_EMOJI:
             emoji_menu();
             break;
+        case ID_WEB_START:
+            web_sharing_start(hwnd);
+            break;
+        case ID_WEB_STOP:
+            web_sharing_stop();
+            MessageBoxW(hwnd, L"Web sharing stopped.", L"ALTEK Link", MB_OK);
+            break;
         case ID_SETTINGS:
             ui_settings(hwnd);
             break;
@@ -957,6 +976,7 @@ static LRESULT CALLBACK main_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     if (msg == WM_DESTROY)
     {
+        web_sharing_stop();
         KillTimer(hwnd, 1);
         if (ui_call)
         {

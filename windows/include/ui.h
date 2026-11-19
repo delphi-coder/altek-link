@@ -31,6 +31,9 @@
 #define ID_HOME 121
 #define ID_RECENTS 122
 
+#define ID_WEB_START 126
+#define ID_WEB_STOP 127
+
 #define ID_VIEW 123
 
 #define ID_FULLSCREEN 124
@@ -55,6 +58,9 @@ void ui_theme_apply(void);
 extern HFONT ui_font, ui_small, ui_bold;
 extern char ui_peer[65];
 extern HWND ui_chat, ui_input, ui_call;
+int web_sharing_is_active(void);
+void web_sharing_start(HWND parent);
+void web_sharing_stop(void);
 void ui_settings(HWND parent);
 void ui_avatar(HWND parent, const char *hash);
 void ui_draw_button(DRAWITEMSTRUCT *d);
